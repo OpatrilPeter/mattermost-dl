@@ -1,0 +1,16 @@
+{
+    "$schema": "http://json-schema.org/schema",
+    "properties": {
+        "hostname": {"type": "string"},
+        "used_api": {"type": "number", "const": 4},
+        "username": {"type": "string"},
+        "password": {"type": "string"},
+        "token": {"type": "string"},
+        "output": {
+            "type": "object",
+            "properties": {
+                "userPattern": {"type": "string"}
+            }
+        }
+    }
+}
