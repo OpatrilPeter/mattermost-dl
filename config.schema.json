@@ -1,15 +1,84 @@
 {
     "$schema": "http://json-schema.org/schema",
+    "required": ["hostname", "used_api", "username"],
+    "definitions": {
+        "entityLocator": {
+            "type": "object",
+            "oneOf": [
+                {
+                    "required": ["id"],
+                    "additionalProperties": false,
+                    "properties": {"id": {"type": "string"}}
+                },
+                {
+                    "required": ["name"],
+                    "additionalProperties": false,
+                    "properties": {"name": {
+                        "type": "string",
+                        "description": "Pretty (displayed) name."
+                    }}
+                },
+                {
+                    "required": ["internalName"],
+                    "additionalProperties": false,
+                    "properties": {"internalName": {
+                        "type": "string",
+                        "description": "Internal name (used in API)."
+                    }}
+                }
+            ]
+        }
+    },
     "properties": {
-        "hostname": {"type": "string"},
-        "used_api": {"type": "number", "const": 4},
+        "hostname": {
+            "description": "Mattermost server url used as prefix to api calls.",
+            "type": "string"
+        },
+        "usedApi": {"type": "number", "const": 4},
         "username": {"type": "string"},
         "password": {"type": "string"},
         "token": {"type": "string"},
+        "teams": {
+            "type": "array",
+            "items": {
+                "description": "Team scraping info. May also specify subset of data to be scraped",
+                "type": "object",
+                "required": ["team"],
+                "properties": {
+                    "team": {"$ref": "#/definitions/entityLocator"},
+                    "channels": {
+                        "type": "array",
+                        "items": {"$ref": "#/definitions/entityLocator"}
+                    }
+                }
+            }
+        },
+        "users": {
+            "description": "List of users we want to save private conversations with (all if ommited)",
+            "type": "array",
+            "items": {"$ref": "#/definitions/entityLocator"}
+        },
+        "timeAfter": {
+            "type": "integer",
+            "description": "Unix milisecond timestamp, messages posted at and after that timepoint are included. Unlimited by default."
+        },
+        "timeBefore": {
+            "type": "integer",
+            "description": "Unix milisecond timestamp, only messages posted before that timepoint are included. Defaults to current time."
+        },
+        "throttling": {
+            "type": "object",
+            "properties": {
+                "loopDelay": {
+                    "description": "Delay between bulk requests in ms.",
+                    "type": "integer"
+                }
+            }
+        },
         "output": {
             "type": "object",
             "properties": {
-                "userPattern": {"type": "string"}
+                "directory": {"type": "string"}
             }
         }
     }
