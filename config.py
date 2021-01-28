@@ -39,9 +39,12 @@ class ConfigFile:
     token: str = ''
 
     throttlingLoopDelay: int = 0
-    outputDirectory: Path = Path()
     teams: Union[bool, List[TeamSpec]] = True
     users: EntityList = True
+
+    outputDirectory: Path = Path()
+    verboseStandalonePosts: bool = False
+    verboseHumanFriendlyPosts: bool = False
 
 def readConfig(filename):
     with open(filename) as f:
@@ -57,6 +60,11 @@ def readConfig(filename):
         if 'output' in config:
             if 'directory' in config['output']:
                 res.outputDirectory = Path(config['output']['directory'])
+            if 'standalonePosts' in config['output']:
+                res.verboseStandalonePosts = config['output']['standalonePosts']
+            if 'humanFriendlyPosts' in config['output']:
+                res.verboseHumanFriendlyPosts = config['output']['humanFriendlyPosts']
+
         if 'teams' in config:
             assert isinstance(config['teams'], list)
             if len(config['teams']) == 0:

@@ -3,7 +3,7 @@ import json
 import logging
 import requests
 from time import sleep
-from typing import Any, Callable, Dict, NamedTuple, NoReturn, Optional, TextIO, Union, cast
+from typing import Any, BinaryIO, Callable, Dict, NamedTuple, NoReturn, Optional, TextIO, Union, cast
 
 
 from bo import *
@@ -69,6 +69,10 @@ class MattermostDriver:
         r = self.getRaw(apiCommand, params)
         return r.json()
 
+    def storeUrlInto(self, url: str, fp: BinaryIO):
+        response = self.getRaw(url)
+        fp.write(response.content)
+
     def postRaw(self, apiCommand: str, data: Union[bytes, str]) -> requests.Response:
         '''
             Common json passing returning request of POST variety.
@@ -118,9 +122,10 @@ class MattermostDriver:
         self.cache.users.update({u.id: u})
         return u
 
-    def loadLocalUser(self):
+    def loadLocalUser(self) -> User:
         u = self.getUserByName(self.configfile.username)
         self.context['userId'] = u.id
+        return u
 
     def getTeams(self) -> Dict[Id, Team]:
         if len(self.cache.teams) != 0:
@@ -313,4 +318,11 @@ class MattermostDriver:
             raise KeyError
 
     def getEmojiUrl(self, emoji: Emoji):
-        return f'{self.configfile.hostname}{self.API_PART}/emoji/{emoji.id}/image'
+        return f'{self.configfile.hostname}{self.API_PART}emoji/{emoji.id}/image'
+
+    def getFileUrl(self, file: FileAttachment, apiUrl = False) -> str:
+        # Note: public access links may be available at files/{fileId}/link, but may be unimplemented by server
+        if apiUrl:
+            return f'files/{file.id}'
+        else:
+            return f'{self.configfile.hostname}{self.API_PART}files/{file.id}'

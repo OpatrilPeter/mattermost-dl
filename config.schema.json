@@ -1,6 +1,6 @@
 {
     "$schema": "http://json-schema.org/schema",
-    "required": ["hostname", "used_api", "username"],
+    "required": ["hostname", "usedApi", "username"],
     "definitions": {
         "entityLocator": {
             "type": "object",
@@ -29,7 +29,9 @@
             ]
         }
     },
+    "additionalProperties": false,
     "properties": {
+        "$schema": {"type": "string"},
         "hostname": {
             "description": "Mattermost server url used as prefix to api calls.",
             "type": "string"
@@ -44,6 +46,7 @@
                 "description": "Team scraping info. May also specify subset of data to be scraped",
                 "type": "object",
                 "required": ["team"],
+                "additionalProperties": false,
                 "properties": {
                     "team": {"$ref": "#/definitions/entityLocator"},
                     "channels": {
@@ -77,8 +80,17 @@
         },
         "output": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
-                "directory": {"type": "string"}
+                "directory": {"type": "string"},
+                "standalonePosts": {
+                    "description": "Whether posts contain redundant information that makes them readable without looking up ids.",
+                    "type": "boolean"
+                },
+                "humanFriendlyPosts": {
+                    "description": "Drops unnecessary ids from posts, replacing userIds with userNames.",
+                    "type": "boolean"
+                }
             }
         }
     }

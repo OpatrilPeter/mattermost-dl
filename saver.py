@@ -1,11 +1,13 @@
 
-from typing import Iterable, Optional, Set
+import json
 from pprint import pprint as pp
+from pathlib import Path
+from typing import Iterable, Optional, Set
 
+from bo import *
 from config import ConfigFile, EntityLocator as ConfigEntityLocator
 from driver import MattermostDriver
 
-from bo import *
 
 class Saver:
     def __init__(self, configfile: ConfigFile, driver: Optional[MattermostDriver] = None):
@@ -13,6 +15,7 @@ class Saver:
             driver = MattermostDriver(configfile)
         self.configfile = configfile
         self.driver: MattermostDriver = driver
+        self.user: User # Conveniency, fetched on call
 
     def matchChannel(self, channel: Channel, locator: ConfigEntityLocator) -> bool:
         if hasattr(locator, 'id'):
@@ -73,13 +76,10 @@ class Saver:
                 for ch in availableTeam.channels.values():
                     if ch.type != ChannelType.Direct and self.matchChannel(ch, wch):
                         res.append(ch)
+                        break
                 else:
-                    logging.warning(f'Found no requested channel on team {team.internalName} via locator {wch}.')
+                    logging.warning(f'Found no requested channel on team {team.internalName} ({team.name}) via locator {wch}.')
             return res
-            return [ch
-                for ch in availableTeam.channels.values()
-                for wch in wantedChannels if self.matchChannel(ch, wch)
-            ]
 
         if self.configfile.teams is True:
             res = {t: [ch for ch in t.channels.values()] for t in teams.values()}
@@ -106,13 +106,87 @@ class Saver:
                     logging.error(f'Team requested by {wantedTeam.team} was not found!')
         return res
 
+    def enrichPostReaction(self, reaction: PostReaction):
+        if self.configfile.verboseStandalonePosts:
+            reaction.emoji = self.driver.getEmojiByName(reaction.emojiName)
+        elif self.configfile.verboseHumanFriendlyPosts:
+            reaction.userName = self.driver.getUserById(reaction.userId).name
+            del reaction.userId
+
+    def enrichEmoji(self, emoji: Emoji):
+        if self.configfile.verboseStandalonePosts or self.configfile.verboseHumanFriendlyPosts:
+            emoji.imageUrl = self.driver.getEmojiUrl(emoji)
+        if self.configfile.verboseStandalonePosts:
+            emoji.creator = self.driver.getUserById(emoji.creatorId)
+        elif self.configfile.verboseHumanFriendlyPosts:
+            emoji.creatorName = self.driver.getUserById(emoji.creatorId).name
+            del emoji.creatorId
+
+
+    # Note: the post gets mutated, so we better not pass persistent copy
+    def enrichPost(self, post: Post):
+        if self.configfile.verboseStandalonePosts:
+            post.user = self.driver.getUserById(post.userId)
+        elif self.configfile.verboseHumanFriendlyPosts:
+            post.userName = self.driver.getUserById(post.userId).name
+            del post.id
+            del post.userId
+            if hasattr(post, 'parent'):
+                del post.parent # Without post.id the parent id is useless
+        if hasattr(post, 'attachments'):
+            for file in post.attachments:
+                if self.configfile.verboseStandalonePosts or self.configfile.verboseHumanFriendlyPosts:
+                    file.url = self.driver.getFileUrl(file)
+                if self.configfile.verboseHumanFriendlyPosts:
+                    del file.id
+        if hasattr(post, 'reactions'):
+                for reaction in post.reactions:
+                    self.enrichPostReaction(reaction)
+
+
+    def jsonDumpToFile(self, obj, fp):
+        json.dump(obj, fp, default=lambda obj: obj.toJson(), ensure_ascii=False)
+
     def processDirectChannel(self, otherUser: User, channel: Channel):
         logging.debug(f"Processing conversation with {otherUser.name} ...")
+
+
+        directChannelOutfile = f'{self.user.name}-{otherUser.name}'
+
+        with open(self.configfile.outputDirectory / Path(directChannelOutfile + '.meta.json'), 'w') as output:
+            content = {
+                'channel': channel.toJson(),
+                'users': [self.user.toJson(), otherUser.toJson()]
+            }
+            self.jsonDumpToFile(content, output)
+        with open(self.configfile.outputDirectory / Path(directChannelOutfile + '.data.json'), 'w') as output:
+            def perPost(p: Post):
+                self.enrichPost(p)
+                self.jsonDumpToFile(p.__dict__, output)
+                output.write('\n')
+            self.driver.processPosts(processor=perPost, channel=channel)
+
     def processPublicChannel(self, team: Team, channel: Channel):
         if channel.type == ChannelType.Group:
-            logging.debug(f"Processing group chat {team.name}/{channel.name} ...")
+            logging.debug(f"Processing group chat {team.internalName}/{channel.internalName} ...")
         else:
-            logging.debug(f"Processing channel {team.name}/{channel.name} ...")
+            logging.debug(f"Processing channel {team.internalName}/{channel.internalName} ...")
+
+        channelOutfile = f'{team.internalName}-{channel.internalName}'
+
+        with open(self.configfile.outputDirectory / Path(channelOutfile + '.meta.json'), 'w') as output:
+            content = {
+                'team': team.toJson(includeChannels=False),
+                'channel': channel.toJson()
+            }
+            self.jsonDumpToFile(content, output)
+        with open(self.configfile.outputDirectory / Path(channelOutfile + '.data.json'), 'w') as output:
+            def perPost(p: Post):
+                self.enrichPost(p)
+                self.jsonDumpToFile(p.__dict__, output)
+                output.write('\n')
+            self.driver.processPosts(processor=perPost, channel=channel)
+
 
     def __call__(self):
         if not self.configfile.outputDirectory.is_dir():
@@ -121,14 +195,13 @@ class Saver:
 
         if self.configfile.token == '':
             m.login()
-        m.loadLocalUser()
+        self.user = m.loadLocalUser()
 
         teams = m.getTeams()
         if len(teams) == 0:
             logging.fatal(f'User {self.configfile.username} is not member of any teams!')
             return
 
-        defaultTeamId = next(t for t in teams)
         for team in teams.values():
             m.loadChannels(teamId=team.id)
 
@@ -139,6 +212,3 @@ class Saver:
         for team in publicChannels:
             for channel in publicChannels[team]:
                 self.processPublicChannel(team, channel)
-
-
-
