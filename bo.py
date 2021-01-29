@@ -8,16 +8,23 @@ from dataclasses import dataclass, field as dataclassfield
 from enum import Enum
 from functools import total_ordering
 import logging
+from numbers import Number
 from typing import Any, Dict, List, Optional, Union
 
 @total_ordering
 class Time:
-    def __init__(self, posixTimestampMs: int):
-        self._time: int = posixTimestampMs
+    def __init__(self, time: Union[int, str]):
+        self._time: Union[int, float]
+        # time is unix timestamp in miliseconds
+        if isinstance(time, int):
+            self._time = time
+        else:
+            assert isinstance(time, str)
+            self._time = datetime.fromisoformat(time).timestamp() * 1000
 
     # Returns unix timestamp in miliseconds
     @property
-    def timestamp(self) -> int:
+    def timestamp(self) -> Union[int, float]:
         return self._time
     def __eq__(self, other: 'Time'):
         return self._time == other._time
@@ -33,7 +40,7 @@ class Time:
     def __repr__(self):
         return f"'{datetime.fromtimestamp(self._time/1000).isoformat()}'"
 
-    def toJson(self) -> int:
+    def toJson(self) -> Union[int, float]:
         return self.timestamp
 
 Id = str

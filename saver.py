@@ -130,9 +130,6 @@ class Saver:
         elif self.configfile.verboseHumanFriendlyPosts:
             post.userName = self.driver.getUserById(post.userId).name
             del post.id
-            del post.userId
-            if hasattr(post, 'parent'):
-                del post.parent # Without post.id the parent id is useless
         if hasattr(post, 'attachments'):
             for file in post.attachments:
                 if self.configfile.verboseStandalonePosts or self.configfile.verboseHumanFriendlyPosts:
@@ -140,8 +137,8 @@ class Saver:
                 if self.configfile.verboseHumanFriendlyPosts:
                     del file.id
         if hasattr(post, 'reactions'):
-                for reaction in post.reactions:
-                    self.enrichPostReaction(reaction)
+            for reaction in post.reactions:
+                self.enrichPostReaction(reaction)
 
 
     def jsonDumpToFile(self, obj, fp):

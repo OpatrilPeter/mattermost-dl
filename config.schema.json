@@ -1,97 +1,263 @@
 {
-    "$schema": "http://json-schema.org/schema",
-    "required": ["hostname", "usedApi", "username"],
-    "definitions": {
-        "entityLocator": {
-            "type": "object",
-            "oneOf": [
-                {
-                    "required": ["id"],
-                    "additionalProperties": false,
-                    "properties": {"id": {"type": "string"}}
-                },
-                {
-                    "required": ["name"],
-                    "additionalProperties": false,
-                    "properties": {"name": {
-                        "type": "string",
-                        "description": "Pretty (displayed) name."
-                    }}
-                },
-                {
-                    "required": ["internalName"],
-                    "additionalProperties": false,
-                    "properties": {"internalName": {
-                        "type": "string",
-                        "description": "Internal name (used in API)."
-                    }}
-                }
-            ]
-        }
-    },
-    "additionalProperties": false,
-    "properties": {
-        "$schema": {"type": "string"},
-        "hostname": {
-            "description": "Mattermost server url used as prefix to api calls.",
-            "type": "string"
+  "$schema": "http://json-schema.org/schema",
+  "required": [
+    "hostname",
+    "usedApi",
+    "username"
+  ],
+  "definitions": {
+    "timepoint": {
+      "description": "Definition of point in time",
+      "oneOf": [
+        {
+          "description": "Unix timestamp in miliseconds",
+          "type": "integer"
         },
-        "usedApi": {"type": "number", "const": 4},
-        "username": {"type": "string"},
-        "password": {"type": "string"},
-        "token": {"type": "string"},
-        "teams": {
+        {
+          "description": "ISO datetime as string, for example 1970-01-01T01:23:45.832330",
+          "type": "string"
+        }
+      ]
+    },
+    "entityLocator": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Pretty (displayed) name."
+            }
+          }
+        },
+        {
+          "required": [
+            "internalName"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "internalName": {
+              "type": "string",
+              "description": "Internal name (used in API)."
+            }
+          }
+        }
+      ]
+    },
+    "channelPostFilters": {
+      "properties": {
+        "beforePost": {
+          "type": "string",
+          "description": "Only fetching posts up to and not including this post id."
+        },
+        "afterPost": {
+          "type": "string",
+          "description": "Only fetching posts after and including this post id."
+        },
+        "afterTime": {
+          "$ref": "#/definitions/timepoint"
+        },
+        "beforeTime": {
+          "$ref": "#/definitions/timepoint"
+        }
+      }
+    }
+  },
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "hostname": {
+      "description": "Mattermost server url used as prefix to api calls.",
+      "type": "string"
+    },
+    "usedApi": {
+      "type": "number",
+      "const": 4
+    },
+    "username": {
+      "type": "string"
+    },
+    "password": {
+      "type": "string"
+    },
+    "token": {
+      "type": "string"
+    },
+    "teams": {
+      "type": "array",
+      "items": {
+        "description": "Team scraping info. May also specify subset of data to be scraped",
+        "type": "object",
+        "required": [
+          "team"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "team": {
+            "$ref": "#/definitions/entityLocator"
+          },
+          "channels": {
+            "description": "Public (open) channels to save. All if ommited",
             "type": "array",
             "items": {
-                "description": "Team scraping info. May also specify subset of data to be scraped",
-                "type": "object",
-                "required": ["team"],
-                "additionalProperties": false,
-                "properties": {
-                    "team": {"$ref": "#/definitions/entityLocator"},
-                    "channels": {
-                        "type": "array",
-                        "items": {"$ref": "#/definitions/entityLocator"}
+              "allOf": [
+                {
+                  "description": "Channel unique identificators",
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "id"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "internalName"
+                      ],
+                      "properties": {
+                        "internalName": {
+                          "type": "string"
+                        }
+                      }
                     }
-                }
-            }
-        },
-        "users": {
-            "description": "List of users we want to save private conversations with (all if ommited)",
-            "type": "array",
-            "items": {"$ref": "#/definitions/entityLocator"}
-        },
-        "timeAfter": {
-            "type": "integer",
-            "description": "Unix milisecond timestamp, messages posted at and after that timepoint are included. Unlimited by default."
-        },
-        "timeBefore": {
-            "type": "integer",
-            "description": "Unix milisecond timestamp, only messages posted before that timepoint are included. Defaults to current time."
-        },
-        "throttling": {
-            "type": "object",
-            "properties": {
-                "loopDelay": {
-                    "description": "Delay between bulk requests in ms.",
-                    "type": "integer"
-                }
-            }
-        },
-        "output": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "directory": {"type": "string"},
-                "standalonePosts": {
-                    "description": "Whether posts contain redundant information that makes them readable without looking up ids.",
-                    "type": "boolean"
+                  ]
                 },
-                "humanFriendlyPosts": {
-                    "description": "Drops unnecessary ids from posts, replacing userIds with userNames.",
-                    "type": "boolean"
+                {
+                  "$ref": "#/definitions/channelPostFilters"
                 }
+              ]
             }
+          },
+          "groups": {
+            "description": "List of groups we want to save conversations with (all if ommited)",
+            "type": "array",
+            "items": {
+              "description": "Group channel selector. Specify by id or list of users.",
+              "allOf": [
+                {
+                  "description": "Channel unique locator.",
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "id"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "description": "User selector. Specify by id or name.",
+                        "type": "object",
+                        "oneOf": [
+                          {
+                            "required": [
+                              "id"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          {
+                            "required": [
+                              "name"
+                            ],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$ref": "#/definitions/channelPostFilters"
+                }
+              ]
+            }
+          }
         }
+      }
+    },
+    "users": {
+      "description": "List of users we want to save private conversations with (all if ommited)",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/entityLocator"
+      }
+    },
+    "postsAfter": {
+      "$ref": "#/definitions/timepoint"
+    },
+    "postsBefore": {
+      "$ref": "#/definitions/timepoint"
+    },
+    "throttling": {
+      "type": "object",
+      "properties": {
+        "loopDelay": {
+          "description": "Delay between bulk requests in ms.",
+          "type": "integer"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "directory": {
+          "type": "string"
+        },
+        "standalonePosts": {
+          "description": "Whether posts contain redundant information that makes them readable without looking up ids.",
+          "type": "boolean"
+        },
+        "humanFriendlyPosts": {
+          "description": "Drops unnecessary ids from posts (replacing userIds with userNames).",
+          "type": "boolean"
+        }
+      }
     }
+  }
 }
