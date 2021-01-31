@@ -9,7 +9,7 @@ from enum import Enum
 from functools import total_ordering
 import logging
 from numbers import Number
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, NewType, Optional, Union
 
 @total_ordering
 class Time:
@@ -43,7 +43,7 @@ class Time:
     def toJson(self) -> Union[int, float]:
         return self.timestamp
 
-Id = str
+Id = NewType('Id', str)
 
 class JsonMessage:
     def __init__(self, info: dict):
@@ -336,6 +336,8 @@ class Channel(JsonMessage):
         self.drop('extra_update_at')
 
         self.cleanMisc()
+
+        self.members: List[User]
 
     def __str__(self):
         return f'Channel({self.internalName})'

@@ -1,9 +1,8 @@
 import json
-# import os
 import logging
 import requests
 from time import sleep
-from typing import Any, BinaryIO, Callable, Dict, NamedTuple, NoReturn, Optional, TextIO, Union, cast
+from typing import Any, BinaryIO, Callable, Dict, NoReturn, Optional, Union
 
 
 from bo import *
@@ -22,7 +21,7 @@ class MattermostDriver:
         self.configfile: ConfigFile = config
         self.authorizationToken: Optional[str] = config.token if config.token else None
         # Information we get along the way
-        self.context: Dict[str, str] = {}
+        self.context: Dict[str, Any] = {}
         self.cache = Cache()
 
     def onBadHttpResponse(self, request: str, result: requests.Response) -> NoReturn:
@@ -156,7 +155,7 @@ class MattermostDriver:
 
     def loadChannels(self, teamId: Id = None):
         if not teamId:
-            teamId = self.context['teamId']
+            teamId = Id(self.context['teamId'])
         channelInfos = self.get(f'users/{{userId}}/teams/{teamId}/channels')
         t = self.cache.teams[teamId]
         assert isinstance(channelInfos, list)
@@ -164,11 +163,11 @@ class MattermostDriver:
             ch = Channel(chInfo)
             t.channels.update({ch.id: ch})
 
-    def getChannelById(self, channelId: Id, teamId = None) -> Channel:
+    def getChannelById(self, channelId: Id, teamId: Id = None) -> Channel:
         if not teamId:
             teamId = self.context['teamId']
         return self.cache.teams[teamId].channels[channelId]
-    def getChannelByName(self, name: str, teamId = None) -> Channel:
+    def getChannelByName(self, name: str, teamId: Id = None) -> Channel:
         if not teamId:
             teamId = self.context['teamId']
         for channel in self.cache.teams[teamId].channels.values():
@@ -202,12 +201,14 @@ class MattermostDriver:
         '''
         left, right = channelName.split('__')
         if left == self.context['userId']:
-            return right
+            return Id(right)
         else:
-            return left
+            return Id(left)
 
+    def loadChannelMembers(self, channel: Channel):
+        if hasattr(channel, 'members'):
+            return
 
-    def getChannelMembers(self, channel: Channel) -> List[User]:
         res = []
 
         page = 0
@@ -226,8 +227,8 @@ class MattermostDriver:
 
             page += 1
             self.delay()
-        return res
 
+        channel.members = res
 
     def processPosts(self, processor: Callable[[Post], None], channel: Channel = None, beforePost: Id = None, afterPost: Id = None, bufferSize: int = 60, maxCount: int = 0, offset: int = 0):
         if channel:

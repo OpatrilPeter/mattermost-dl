@@ -20,13 +20,13 @@
       ]
     },
     "entityLocator": {
+      "description": "Unique identification of an entity.",
       "type": "object",
       "oneOf": [
         {
           "required": [
             "id"
           ],
-          "additionalProperties": false,
           "properties": {
             "id": {
               "type": "string"
@@ -37,11 +37,10 @@
           "required": [
             "name"
           ],
-          "additionalProperties": false,
           "properties": {
             "name": {
-              "type": "string",
-              "description": "Pretty (displayed) name."
+              "description": "Pretty (displayed) name.",
+              "type": "string"
             }
           }
         },
@@ -49,31 +48,80 @@
           "required": [
             "internalName"
           ],
-          "additionalProperties": false,
           "properties": {
             "internalName": {
-              "type": "string",
-              "description": "Internal name (used in API)."
+              "description": "Internal name (used in API).",
+              "type": "string"
             }
           }
         }
       ]
     },
-    "channelPostFilters": {
+    "channelPostOptions": {
+      "type": "object",
       "properties": {
         "beforePost": {
           "type": "string",
-          "description": "Only fetching posts up to and not including this post id."
+          "description": "Only fetches posts up to and not including this post id."
         },
         "afterPost": {
           "type": "string",
-          "description": "Only fetching posts after and including this post id."
+          "description": "Only fetches posts after and not including this post id."
         },
         "afterTime": {
+          "description": "Only fetches post after before given timepoint.",
           "$ref": "#/definitions/timepoint"
         },
         "beforeTime": {
+          "description": "Only fetches post created before given timepoint.",
           "$ref": "#/definitions/timepoint"
+        },
+        "redownload": {
+          "description": "If true, WILL redownload and overwrite messages already stored by previous runs. On false (default), this behavior is minimized on best effort basis.",
+          "type": "boolean"
+        },
+        "downloadFromOldest": {
+          "description": "Selects download direction, going from oldest to newest by default.",
+          "type": "boolean"
+        },
+        "maximumPostCount": {
+          "description": "Download only up to given number of posts. Unlimited if -1 or default.",
+          "type": "integer",
+          "minimum": -1
+        },
+        "attachments": {
+          "type": "object",
+          "properties": {
+            "allow": {
+              "description": "Whether to download file attachments or not. Defaults to false.",
+              "type": "boolean"
+            },
+            "maxSize": {
+              "description": "Download only files that are up to and including given size in bytes.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "allowedMimeTypes": {
+              "description": "Download only files of specified mime types. No limit if ommited.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "emojis": {
+          "type": "object",
+          "properties": {
+            "download": {
+              "description": "Whether to download used custom emojis or not (default).",
+              "type": "boolean"
+            },
+            "metadata": {
+              "description": "Whether to store metadata structures for stored emoji (default) or not. If not, custom emojis are retained only in text form.",
+              "type": "boolean"
+            }
+          }
         }
       }
     }
@@ -113,107 +161,57 @@
             "$ref": "#/definitions/entityLocator"
           },
           "channels": {
-            "description": "Public (open) channels to save. All if ommited",
+            "description": "Public (open) channels to save (all if ommited).",
             "type": "array",
             "items": {
               "allOf": [
                 {
                   "description": "Channel unique identificators",
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "required": [
-                        "id"
-                      ],
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "name"
-                      ],
-                      "properties": {
-                        "name": {
-                          "type": "string"
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "required": [
-                        "internalName"
-                      ],
-                      "properties": {
-                        "internalName": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  ]
+                  "$ref": "#/definitions/entityLocator"
                 },
                 {
-                  "$ref": "#/definitions/channelPostFilters"
+                  "$ref": "#/definitions/channelPostOptions"
                 }
               ]
             }
           },
+          "defaultChannelOptions": {
+            "$ref": "#/definitions/channelPostOptions"
+          },
+          "publicChannelOptions": {
+            "$ref": "#/definitions/channelPostOptions"
+          },
+          "groupChannelOptions": {
+            "$ref": "#/definitions/channelPostOptions"
+          },
           "groups": {
-            "description": "List of groups we want to save conversations with (all if ommited)",
+            "description": "List of groups we want to save conversations with (all if ommited).",
             "type": "array",
             "items": {
               "description": "Group channel selector. Specify by id or list of users.",
+              "type": "object",
+              "required": ["group"],
               "allOf": [
                 {
-                  "description": "Channel unique locator.",
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "required": [
-                        "id"
-                      ],
-                      "properties": {
-                        "id": {
+                  "properties": {
+                    "group": {
+                      "description": "Identification of a group channel. Either channel id or list of users.",
+                      "oneOf": [
+                        {
                           "type": "string"
-                        }
-                      }
-                    },
-                    {
-                      "type": "array",
-                      "items": {
-                        "description": "User selector. Specify by id or name.",
-                        "type": "object",
-                        "oneOf": [
-                          {
-                            "required": [
-                              "id"
-                            ],
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              }
-                            }
-                          },
-                          {
-                            "required": [
-                              "name"
-                            ],
-                            "properties": {
-                              "name": {
-                                "type": "string"
-                              }
-                            }
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/definitions/entityLocator"
                           }
-                        ]
-                      }
+                        }
+                      ]
                     }
-                  ]
+                  }
                 },
                 {
-                  "$ref": "#/definitions/channelPostFilters"
+                  "$ref": "#/definitions/channelPostOptions"
                 }
               ]
             }
@@ -225,14 +223,28 @@
       "description": "List of users we want to save private conversations with (all if ommited)",
       "type": "array",
       "items": {
-        "$ref": "#/definitions/entityLocator"
+        "allOf": [
+          {
+            "description": "Identification of the user.",
+            "$ref": "#/definitions/entityLocator"
+          },
+          {
+            "$ref": "#/definitions/channelPostOptions"
+          }
+        ]
       }
     },
-    "postsAfter": {
-      "$ref": "#/definitions/timepoint"
+    "defaultChannelOptions": {
+      "$ref": "#/definitions/channelPostOptions"
     },
-    "postsBefore": {
-      "$ref": "#/definitions/timepoint"
+    "directChannelOptions": {
+      "$ref": "#/definitions/channelPostOptions"
+    },
+    "groupChannelOptions": {
+      "$ref": "#/definitions/channelPostOptions"
+    },
+    "publicChannelOptions": {
+      "$ref": "#/definitions/channelPostOptions"
     },
     "throttling": {
       "type": "object",

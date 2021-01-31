@@ -2,12 +2,16 @@
 import json
 from pprint import pprint as pp
 from pathlib import Path
-from typing import Iterable, Optional, Set
+from typing import Iterable, Optional, Set, Tuple
 
 from bo import *
-from config import ConfigFile, EntityLocator as ConfigEntityLocator
+from config import ChannelOptions, ChannelSpec, ConfigFile, EntityLocator as ConfigEntityLocator, GroupChannelSpec
 from driver import MattermostDriver
 
+@dataclass
+class ChannelRequest:
+    config: ChannelOptions
+    metadata: Channel
 
 class Saver:
     def __init__(self, configfile: ConfigFile, driver: Optional[MattermostDriver] = None):
@@ -17,6 +21,16 @@ class Saver:
         self.driver: MattermostDriver = driver
         self.user: User # Conveniency, fetched on call
 
+    def getUserByLocator(self, locator: ConfigEntityLocator) -> User:
+        if hasattr(locator, 'id'):
+            return self.driver.getUserById(locator.id)
+        elif hasattr(locator, 'name'):
+            return self.driver.getUserByName(locator.name)
+        elif hasattr(locator, 'internalName'):
+            return self.driver.getUserByName(locator.internalName)
+        else:
+            raise ValueError
+
     def matchChannel(self, channel: Channel, locator: ConfigEntityLocator) -> bool:
         if hasattr(locator, 'id'):
             return channel.id == locator.id
@@ -25,6 +39,16 @@ class Saver:
         else:
             assert hasattr(locator, 'internalName')
             return channel.internalName == locator.internalName
+    def matchGroupChannel(self, channel: Channel, locator: Union[Id, List[ConfigEntityLocator]]) -> bool:
+        if isinstance(locator, str):
+            return channel.id == locator
+        else:
+            assert isinstance(locator, list)
+            users = set(self.getUserByLocator(userLocator)
+                for userLocator in locator
+            )
+            return users == set(u for u in channel.members)
+
     def matchTeam(self, team: Team, locator: ConfigEntityLocator) -> bool:
         if hasattr(locator, 'id'):
             return team.id == locator.id
@@ -34,76 +58,119 @@ class Saver:
             assert hasattr(locator, 'internalName')
             return team.internalName == locator.internalName
 
-    def getWantedUsers(self) -> Set[User]:
-        res = set()
+    def getWantedUsers(self) -> List[Tuple[User, ChannelOptions]]:
+        userIds = set()
+        res = []
         if not isinstance(self.configfile.users, list):
             return res
-        for userLocator in self.configfile.users:
-            if hasattr(userLocator, 'id'):
-                res.add(self.driver.getUserById(userLocator.id))
-            elif hasattr(userLocator, 'name'):
-                res.add(self.driver.getUserByName(userLocator.name))
-            elif hasattr(userLocator, 'internalName'):
-                res.add(self.driver.getUserByName(userLocator.internalName))
+        for userSpec in self.configfile.users:
+            u = self.getUserByLocator(userSpec.locator)
+            if u.id in userIds:
+                logging.warning(f"Explicitly requesting direct messages for user {u.name} more than once.")
+            else:
+                userIds.add(u.id)
+                res.append((u, userSpec.opts))
         return res
 
-    def getWantedDirectChannels(self) -> Dict[User, Channel]:
-        res: Dict[User, Channel] = {}
-        channelNames = {self.driver.getDirectChannelNameByUserId(u.id): u for u in self.getWantedUsers()}
+    def getChannelOptionsForChannel(self, channel: Channel, team: Optional[Team] = None):
+        if team is None:
+            assert channel.type == ChannelType.Private
+            self.configfile
+
+    def getWantedDirectChannels(self) -> Dict[User, ChannelRequest]:
+        res: Dict[User, ChannelRequest] = {}
+        channelNames = {self.driver.getDirectChannelNameByUserId(u.id): (u, opts) for u, opts in self.getWantedUsers()}
         for team in self.driver.getTeams().values():
             for channel in team.channels.values():
                 if channel.type == ChannelType.Direct and (self.configfile.users is True or channel.internalName in channelNames):
-                    if channel.id not in (ch.id for ch in res.values()):
+                    if channel.id not in (ch.metadata.id for ch in res.values()):
                         if self.configfile.users is True:
                             otherUser = self.driver.getUserById(self.driver.getUserIdFromDirectChannelName(channel.internalName))
-                            res.update({otherUser: channel})
+                            res.update({otherUser: ChannelRequest(config=self.configfile.directChannelDefaults, metadata=channel)})
                         else:
-                            res.update({channelNames[channel.internalName]: channel})
+                            u, opts = channelNames[channel.internalName]
+                            res.update({u: ChannelRequest(config=opts, metadata=channel)})
                             del channelNames[channel.internalName]
 
         # Have not found all channels!
-        for user in channelNames.values():
+        for user, _ in channelNames.values():
             logging.warning(f'Found no direct channel with {user.name}.')
         return res
 
-    def getWantedPublicChannels(self) -> Dict[Team, List[Channel]]:
-        res: Dict[Team, List[Channel]] = {}
+    def getWantedPerTeamChannels(self) -> Dict[Team, Tuple[List[ChannelRequest], List[ChannelRequest]]]:
+        if self.configfile.teams is False:
+            return {}
+
+        res: Dict[Team, Tuple[List[ChannelRequest], List[ChannelRequest]]] = {}
         teams = self.driver.getTeams()
 
-        def getChannelsForTeam(team: Team, wantedChannels: List[ConfigEntityLocator]) -> List[Channel]:
-            res = []
+        def getPublicChannelsForTeam(team: Team, wantedChannels: List[ChannelSpec]) -> List[ChannelRequest]:
+            publicChannels = []
             for wch in wantedChannels:
-                for ch in availableTeam.channels.values():
-                    if ch.type != ChannelType.Direct and self.matchChannel(ch, wch):
-                        res.append(ch)
+                for ch in team.channels.values():
+                    if ch.type == ChannelType.Open and self.matchChannel(ch, wch.locator):
+                        publicChannels.append(ChannelRequest(config=wch.opts, metadata=ch))
                         break
                 else:
-                    logging.warning(f'Found no requested channel on team {team.internalName} ({team.name}) via locator {wch}.')
-            return res
+                    logging.warning(f'Found no requested public channel on team {team.internalName} ({team.name}) via locator {wch.locator}.')
+            return publicChannels
+
+        def getGroupChannelsForTeam(team: Team, wantedChannels: List[GroupChannelSpec]) -> List[ChannelRequest]:
+            groupChannels = []
+            for wch in wantedChannels:
+                for ch in team.channels.values():
+                    if ch.type != ChannelType.Group:
+                        continue
+                    if not hasattr(ch, 'members'):
+                        self.driver.loadChannelMembers(ch)
+                    if self.matchGroupChannel(ch, wch.locator):
+                        groupChannels.append(ChannelRequest(config=wch.opts, metadata=ch))
+                        break
+                else:
+                    logging.warning(f'Found no requested group channel on team {team.internalName} ({team.name}) via locator {wch.locator}.')
+            return groupChannels
 
         if self.configfile.teams is True:
-            res = {t: [ch for ch in t.channels.values()] for t in teams.values()}
-        elif self.configfile.teams is False:
-            pass
-        else:
-            assert isinstance(self.configfile.teams, list)
-            for wantedTeam in self.configfile.teams:
-                for availableTeam in teams.values():
-                    if self.matchTeam(availableTeam, wantedTeam.team):
-                        if wantedTeam.channels is True:
-                            res[availableTeam] = [ch for ch in availableTeam.channels.values()
-                                if ch.type != ChannelType.Direct
-                            ]
-                            # addChannels(team, [ch for ch in availableTeam.])
-                        elif wantedTeam.channels is False:
-                            pass
-                        else:
-                            assert isinstance(wantedTeam.channels, list)
-                            res[availableTeam] = getChannelsForTeam(availableTeam, wantedTeam.channels)
-                            # addChannels(team, wantedTeam.channels)
-                        break
-                else:
-                    logging.error(f'Team requested by {wantedTeam.team} was not found!')
+            for t in teams.values():
+                publicChannels, groupChannels = [], []
+                for ch in t.channels.values():
+                    if ch.type == ChannelType.Open:
+                        publicChannels.append(ChannelRequest(config=self.configfile.publicChannelDefaults, metadata=ch))
+                    elif ch.type == ChannelType.Group:
+                        groupChannels.append(ChannelRequest(config=self.configfile.groupChannelDefaults, metadata=ch))
+                res[t] = publicChannels, groupChannels
+            return res
+
+        assert isinstance(self.configfile.teams, list)
+        for wantedTeam in self.configfile.teams:
+            for availableTeam in teams.values():
+                if self.matchTeam(availableTeam, wantedTeam.locator):
+                    publicChannels, groupChannels = [], []
+
+                    if wantedTeam.channels is True:
+                        publicChannels = [ChannelRequest(config=wantedTeam.publicChannelDefaults, metadata=ch) for ch in availableTeam.channels.values()
+                            if ch.type == ChannelType.Open
+                        ]
+                    elif wantedTeam.channels is False:
+                        pass
+                    else:
+                        assert isinstance(wantedTeam.channels, list)
+                        publicChannels = getPublicChannelsForTeam(availableTeam, wantedTeam.channels)
+
+                    if wantedTeam.groups is True:
+                        groupChannels = [ChannelRequest(config=wantedTeam.groupChannelDefaults, metadata=ch) for ch in availableTeam.channels.values()
+                            if ch.type == ChannelType.Group
+                        ]
+                    elif wantedTeam.groups is False:
+                        pass
+                    else:
+                        assert isinstance(wantedTeam.groups, list)
+                        publicChannels = getGroupChannelsForTeam(availableTeam, wantedTeam.groups)
+
+                    res[availableTeam] = publicChannels, groupChannels
+                    break
+            else:
+                logging.error(f'Team requested by {wantedTeam.locator} was not found!')
         return res
 
     def enrichPostReaction(self, reaction: PostReaction):
@@ -144,9 +211,9 @@ class Saver:
     def jsonDumpToFile(self, obj, fp):
         json.dump(obj, fp, default=lambda obj: obj.toJson(), ensure_ascii=False)
 
-    def processDirectChannel(self, otherUser: User, channel: Channel):
+    def processDirectChannel(self, otherUser: User, channelRequest: ChannelRequest):
+        channel, options = channelRequest.metadata, channelRequest.config
         logging.debug(f"Processing conversation with {otherUser.name} ...")
-
 
         directChannelOutfile = f'{self.user.name}-{otherUser.name}'
 
@@ -163,13 +230,15 @@ class Saver:
                 output.write('\n')
             self.driver.processPosts(processor=perPost, channel=channel)
 
-    def processPublicChannel(self, team: Team, channel: Channel):
+    def processPublicChannel(self, team: Team, channelRequest: ChannelRequest):
+        channel, options = channelRequest.metadata, channelRequest.config
         if channel.type == ChannelType.Group:
-            logging.debug(f"Processing group chat {team.internalName}/{channel.internalName} ...")
+            userlist = '-'.join(sorted(u.name for u in channel.members))
+            logging.debug(f"Processing group chat {team.internalName}/{userlist} ...")
+            channelOutfile = f'{team.internalName}-{userlist}'
         else:
             logging.debug(f"Processing channel {team.internalName}/{channel.internalName} ...")
-
-        channelOutfile = f'{team.internalName}-{channel.internalName}'
+            channelOutfile = f'{team.internalName}-{channel.internalName}'
 
         with open(self.configfile.outputDirectory / Path(channelOutfile + '.meta.json'), 'w') as output:
             content = {
@@ -203,9 +272,12 @@ class Saver:
             m.loadChannels(teamId=team.id)
 
         directChannels = self.getWantedDirectChannels()
-        publicChannels = self.getWantedPublicChannels()
+        teamChannels = self.getWantedPerTeamChannels()
         for user, channel in directChannels.items():
             self.processDirectChannel(user, channel)
-        for team in publicChannels:
-            for channel in publicChannels[team]:
+        for team in teamChannels:
+            publicChannels, groupChannels = teamChannels[team]
+            for channel in publicChannels:
+                self.processPublicChannel(team, channel)
+            for channel in groupChannels:
                 self.processPublicChannel(team, channel)
