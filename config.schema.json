@@ -268,6 +268,10 @@
         "humanFriendlyPosts": {
           "description": "Drops unnecessary ids from posts (replacing userIds with userNames).",
           "type": "boolean"
+        },
+        "reportShowProgress": {
+          "description": "True if smart interactive download progress be reported along the way (deduced by stdout type by default).",
+          "type": ["boolean", "null"]
         }
       }
     }

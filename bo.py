@@ -115,8 +115,12 @@ class User(JsonMessage):
         x = self.extract_or('last_picture_update', 0)
         if x != 0 and x != self.createTime.timestamp:
             self.updateAvatarTime = Time(x)
+        x = self.extract('position')
+        if x:
+            self.position: str = x
 
-        x = self.extract('roles').split(',')
+
+        x = self.extract('roles').split(' ')
         if 'system_user' in x and len(x) == 1:
             pass
         else:
@@ -231,18 +235,20 @@ class Post(JsonMessage):
         x = self.extract('type')
         if x:
             self.specialMsgType: str = x
-            self.specialMsgProperties: dict = self.extract('props')
+            x = self.extract('props')
+            if x:
+                self.specialMsgProperties: dict = x
         else:
             self.misc['props'] = {
                 key: value for key, value in self.misc['props'].items()
-                    if key not in ('disable_group_highlight')
+                    # Drop fields that are known to be unnecessary
+                    if (key not in ('disable_group_highlight', 'channel_mentions')
+                        and value != "")
             }
 
         metadata = self.extract('metadata')
         if 'embeds' in metadata:
             # We ignore these, as there is nothing that can't be restructured from message
-            # TODO: remove warning
-            logging.warning("Ignoring embeds: {}", metadata['embeds'])
             del metadata['embeds']
         if 'emojis' in metadata:
             self.emojis: Union[List[Emoji], List[Id]] = [Emoji(emoji)
@@ -281,22 +287,18 @@ class Post(JsonMessage):
 
 
 class ChannelType(Enum):
-    Open = 0
-    Private = 1
-    Group = 2
-    Direct = 3
+    Open = 'O'
+    Private = 'P'
+    Group = 'G'
+    Direct = 'D'
 
-    @staticmethod
-    def load(info: str) -> 'ChannelType':
-        if info == 'D':
-            return ChannelType.Direct
-        elif info == 'P':
-            return ChannelType.Private
-        elif info == 'G':
-            return ChannelType.Group
+    @classmethod
+    def load(cls, info: str) -> 'ChannelType':
+        for member in cls:
+            if member.value == info:
+                return member
         else:
-            if info != 'O':
-                logging.warning(f"Unknown channel type '{info}', assumed open.")
+            logging.warning(f"Unknown channel type '{info}', assumed open.")
             return ChannelType.Open
 
     def toJson(self) -> str:
@@ -327,7 +329,7 @@ class Channel(JsonMessage):
             self.purpose: str = x
 
         self.lastMessageTime: Time = Time(self.extract('last_post_at'))
-        self.messageCount = self.extract('total_msg_count')
+        self.messageCount: int = self.extract('total_msg_count')
         x = self.extract('creator_id')
         if x:
             self.creatorUserId: Id = x
@@ -342,6 +344,23 @@ class Channel(JsonMessage):
     def __str__(self):
         return f'Channel({self.internalName})'
 
+class TeamType(Enum):
+    Open = 'O'
+    InviteOnly = 'I'
+
+    @classmethod
+    def load(cls, info: str) -> 'TeamType':
+        for member in cls:
+            if member.value == info:
+                return member
+        else:
+            logging.warning(f"Unknown team type '{info}', assumed open.")
+            return TeamType.Open
+
+    def toJson(self) -> str:
+        return self.name
+
+
 class Team(JsonMessage):
     def __init__(self, info: dict) -> None:
         super().__init__(info)
@@ -351,6 +370,7 @@ class Team(JsonMessage):
         self.id: Id = self.extract('id')
         self.name: str = self.extract('display_name')
         self.internalName: str = self.extract('name')
+        self.type: TeamType = TeamType(self.extract('type'))
         self.createTime: Time = Time(self.extract('create_at'))
         x = self.extract('update_at')
         if x != self.createTime.timestamp:
@@ -366,11 +386,15 @@ class Team(JsonMessage):
         if x != 0 and x != self.createTime.timestamp:
             self.updateAvatarTime = Time(x)
 
+        x = self.extract('invite_id')
+        if x:
+            self.inviteId: Id = x
 
+        # Uninteresting fields for achivation
+        self.drop('allow_open_invite')
         self.drop('allowed_domains')
 
         self.cleanMisc()
-
 
         self.channels: Dict[Id, Channel] = {}
 

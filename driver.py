@@ -6,7 +6,7 @@ from typing import Any, BinaryIO, Callable, Dict, NoReturn, Optional, Union
 
 
 from bo import *
-from config import ConfigFile
+from config import ConfigFile, OrderDirection
 
 @dataclass
 class Cache:
@@ -230,7 +230,32 @@ class MattermostDriver:
 
         channel.members = res
 
-    def processPosts(self, processor: Callable[[Post], None], channel: Channel = None, beforePost: Id = None, afterPost: Id = None, bufferSize: int = 60, maxCount: int = 0, offset: int = 0):
+    def getPostById(self, postId: Id) -> Post:
+        postInfo = self.get(f'/posts/{postId}')
+        assert isinstance(postInfo, dict)
+        return Post(postInfo)
+
+    def processPosts(self, processor: Callable[[Post], None], channel: Channel = None, *, beforePost: Id = None, afterPost: Id = None, beforeTime: Optional[Time] = None, afterTime: Optional[Time] = None, bufferSize: int = 60, maxCount: int = 0, offset: int = 0, timeDirection: OrderDirection = OrderDirection.Asc):
+        '''
+            Main function to load all channel's posts.
+            Loading happens lazily in batches, each post is passed to external callable.
+
+            Processing order works according to following logic:
+                - add afterPost/beforePost filters. They work serverside and will limit the fetched output
+                - in descending order
+                    - apply offset
+                    - start reading pages, after first page set beforePost to earliest post and read page 0
+                        - skip until beforeTime filter matches, then start processing
+                        - continue collecting until end, maxCount or afterTime is reached
+                - in ascending order
+                    - if afterPost filter exist
+                        - apply offset
+                    - else
+                        - set page according to total message count so that the final page would be shown, then subtract offset
+                    - start reading pages, after first page set afterPost to latest post and read page 0
+                    - skip until afterTime filter matches, then start processing
+                    - continue collecting until end, maxCount or beforeTime is reached
+        '''
         if channel:
             channelId = channel.id
         else:
@@ -240,26 +265,80 @@ class MattermostDriver:
             'per_page': bufferSize
         }
         if afterPost:
-            params.update({'after': afterPost})
+            params.update(after=afterPost)
         if beforePost:
-            params.update({'before': beforePost})
+            params.update(before=beforePost)
 
-        postsRecieved = 0
+        if afterTime and beforeTime and afterTime < beforeTime:
+            return
+        if offset >= channel.messageCount:
+            return
+
+        page: int = 0
+        # How many messages on page shall be ignored (in the download direction)
+        pageOffset: int = 0
+        if timeDirection == OrderDirection.Desc or afterPost:
+            page = offset // bufferSize
+            pageOffset = offset % bufferSize
+        else:
+            absoluteMessageOffset = channel.messageCount - offset
+            page = absoluteMessageOffset // bufferSize - int(absoluteMessageOffset % bufferSize == 0)
+            if offset > channel.messageCount % bufferSize:
+                pageOffset = bufferSize - absoluteMessageOffset % bufferSize
+            else:
+                pageOffset = offset
+            assert pageOffset < bufferSize # Sanity check
+
+        postsProcessed = 0
         while True:
-            if maxCount and maxCount - postsRecieved < bufferSize:
-                params.update({'per_page': maxCount - postsRecieved})
+            if page != 0:
+                params.update(page=page)
             postWindow = self.get(f'channels/{channelId}/posts', params=params)
             assert isinstance(postWindow, dict)
 
-            for postId in postWindow['order']:
-                p = postWindow['posts'][postId]
-                processor(Post(p))
+            finished: bool = False
 
-            postsRecieved += len(postWindow['order'])
-            if len(postWindow['order']) == 0 or postWindow['prev_post_id'] == '' or (maxCount and postsRecieved >= maxCount):
-                break
+            if timeDirection == OrderDirection.Desc:
+                for postId in postWindow['order'][pageOffset:]:
+                    p = postWindow['posts'][postId]
+                    if ((beforePost and p['id'] == beforePost)
+                        or (beforeTime and p['create_at'] >= beforeTime)
+                        or (maxCount and postsProcessed == maxCount)):
+                        finished = True
+                        break
+                    if afterTime and p['create_at'] < afterTime:
+                        continue
+                    processor(Post(p))
+                    postsProcessed += 1
             else:
-                params.update({'before': postWindow['order'][-1]})
+                for postId in reversed(postWindow['order'][:len(postWindow['order'])-pageOffset]):
+                    p = postWindow['posts'][postId]
+                    if ((beforePost and p['id'] == beforePost)
+                        or (afterTime and p['create_at'] <= afterTime)
+                        or (maxCount and postsProcessed == maxCount)):
+                        finished = True
+                        break
+                    if beforeTime and p ['create_at'] > beforeTime:
+                        continue
+                    processor(Post(p))
+                    postsProcessed += 1
+
+            if finished or len(postWindow['order']) == 0 or (maxCount and postsProcessed >= maxCount):
+                break
+            if timeDirection == OrderDirection.Desc:
+                if postWindow['prev_post_id'] == '':
+                    break
+                params.update(before = postWindow['order'][-1])
+            else:
+                if postWindow['next_post_id'] == '':
+                    break
+                params.update(after = postWindow['order'][0])
+
+            if page != 0:
+                page = 0
+                del params['page']
+            if pageOffset != 0:
+                pageOffset = 0
             sleep(self.configfile.throttlingLoopDelay / 1000) # Dump rate limit avoidance
 
     def getPosts(self, channel: Channel = None, *args, **kwargs) -> List[Post]:
@@ -268,8 +347,6 @@ class MattermostDriver:
             result.append(p)
         self.processPosts(channel=channel, processor=process, *args, **kwargs)
         return result
-    # def savePrivateHistory(self, otherUserName: str, outputFp: TextIO):
-    #     otherUserId = self.getUserByName(otherUserName).id
 
     def processEmojiList(self, processor: Callable[[Emoji], None], bufferSize: int = 60, maxCount: int = 0):
         params = {
@@ -318,12 +395,15 @@ class MattermostDriver:
         else:
             raise KeyError
 
-    def getEmojiUrl(self, emoji: Emoji):
-        return f'{self.configfile.hostname}{self.API_PART}emoji/{emoji.id}/image'
+    def getEmojiUrl(self, emoji: Emoji) -> str:
+        return f'emoji/{emoji.id}/image'
 
-    def getFileUrl(self, file: FileAttachment, apiUrl = False) -> str:
-        # Note: public access links may be available at files/{fileId}/link, but may be unimplemented by server
-        if apiUrl:
-            return f'files/{file.id}'
+    def getFileUrl(self, file: FileAttachment, publicUrl = False) -> str:
+        # Note: public access links may be unimplemented by server
+        if publicUrl:
+            return f'{self.configfile.hostname}{self.API_PART}files/{file.id}/link'
         else:
-            return f'{self.configfile.hostname}{self.API_PART}files/{file.id}'
+            return f'files/{file.id}'
+
+    def getAvatarUrl(self, user: User) -> str:
+        return f'users/{user.id}/image'

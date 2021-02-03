@@ -4,12 +4,12 @@
 
 ### feat
 
-- selecting group chats
-- support for usual things in misc of various entities
 - collecting used emoji and used users and add them to channel metadata
 - support for downloading emojis and files
+- support for downloading avatars
 - time intervals for post download
   - store channel header after messages, keep metadata so messages from channel firstMessage..lastSavedMessage won't need to be resend
+  - implement for private channels
 
 ## 1.0
 

@@ -2,16 +2,72 @@
 import json
 from pprint import pprint as pp
 from pathlib import Path
-from typing import Iterable, Optional, Set, Tuple
+from typing import cast, Optional, Set, Tuple
+import sys
 
 from bo import *
-from config import ChannelOptions, ChannelSpec, ConfigFile, EntityLocator as ConfigEntityLocator, GroupChannelSpec
+from config import ChannelOptions, ChannelSpec, ConfigFile, EntityLocator as ConfigEntityLocator, GroupChannelSpec, OrderDirection
 from driver import MattermostDriver
+import progress
 
 @dataclass
 class ChannelRequest:
     config: ChannelOptions
     metadata: Channel
+
+@dataclass(init=False)
+class ChannelHeader:
+    # If set, posts from the start of the channel up to this time are archived
+    lastPostTime: Time
+    # If set, posts from the start of the channel up to this post id are archived
+    lastPostId: Optional[Id]
+    # Users that appeared in conversations
+    usedUsers: Set[User]
+    # Emojis that appeared in conversations
+    usedEmojis: Set[Emoji]
+    team: Optional[Team]
+    channel: Channel
+
+    def __init__(self, channel: Channel, team: Team = None):
+        self.channel: Channel = channel
+        self.team = team
+        self.lastPostTime = Time(0)
+        self.lastPostId = None
+        self.usedUsers = set()
+        self.usedEmojis = set()
+
+    def load(self, info: dict, driver: MattermostDriver):
+        '''
+            Loading previously saved header.
+        '''
+        if 'lastPostTime' in info:
+            self.lastPostTime = Time(info['lastPostTime'])
+        if 'lastPostId' in info:
+            self.lastPostId = Id(info['lastPostId'])
+        if 'users' in info:
+            # TODO: load users from json
+            for userInfo in info['users']:
+                u = None
+                if 'id' in userInfo:
+                    u = driver.getUserById(userInfo['id'])
+                elif 'name' in userInfo:
+                    u = driver.getUserByName(userInfo['name'])
+                if u is not None:
+                    self.usedUsers.add(u)
+
+    def save(self) -> dict:
+        content = {}
+        if self.team:
+            content.update(team=self.team.toJson(includeChannels=False))
+        content.update(channel=self.channel.toJson())
+        if self.lastPostId is not None:
+            content.update(lastPostId=self.lastPostId)
+        if self.lastPostTime.timestamp != 0:
+            content.update(lastPostTime=self.lastPostTime)
+        content.update(users=[u.toJson() for u in self.usedUsers])
+
+        return content
+
 
 class Saver:
     def __init__(self, configfile: ConfigFile, driver: Optional[MattermostDriver] = None):
@@ -48,7 +104,6 @@ class Saver:
                 for userLocator in locator
             )
             return users == set(u for u in channel.members)
-
     def matchTeam(self, team: Team, locator: ConfigEntityLocator) -> bool:
         if hasattr(locator, 'id'):
             return team.id == locator.id
@@ -71,11 +126,6 @@ class Saver:
                 userIds.add(u.id)
                 res.append((u, userSpec.opts))
         return res
-
-    def getChannelOptionsForChannel(self, channel: Channel, team: Optional[Team] = None):
-        if team is None:
-            assert channel.type == ChannelType.Private
-            self.configfile
 
     def getWantedDirectChannels(self) -> Dict[User, ChannelRequest]:
         res: Dict[User, ChannelRequest] = {}
@@ -189,7 +239,6 @@ class Saver:
             emoji.creatorName = self.driver.getUserById(emoji.creatorId).name
             del emoji.creatorId
 
-
     # Note: the post gets mutated, so we better not pass persistent copy
     def enrichPost(self, post: Post):
         if self.configfile.verboseStandalonePosts:
@@ -234,25 +283,86 @@ class Saver:
         channel, options = channelRequest.metadata, channelRequest.config
         if channel.type == ChannelType.Group:
             userlist = '-'.join(sorted(u.name for u in channel.members))
-            logging.debug(f"Processing group chat {team.internalName}/{userlist} ...")
-            channelOutfile = f'{team.internalName}-{userlist}'
+            logging.info(f"Processing group chat {team.internalName}/{userlist} ...")
+            channelOutfile = f'{team.internalName}--{userlist}'
         else:
-            logging.debug(f"Processing channel {team.internalName}/{channel.internalName} ...")
-            channelOutfile = f'{team.internalName}-{channel.internalName}'
+            logging.info(f"Processing channel {team.internalName}/{channel.internalName} ...")
+            channelOutfile = f'{team.internalName}--{channel.internalName}'
 
-        with open(self.configfile.outputDirectory / Path(channelOutfile + '.meta.json'), 'w') as output:
-            content = {
-                'team': team.toJson(includeChannels=False),
-                'channel': channel.toJson()
-            }
-            self.jsonDumpToFile(content, output)
-        with open(self.configfile.outputDirectory / Path(channelOutfile + '.data.json'), 'w') as output:
-            def perPost(p: Post):
-                self.enrichPost(p)
-                self.jsonDumpToFile(p.__dict__, output)
-                output.write('\n')
-            self.driver.processPosts(processor=perPost, channel=channel)
+        headerFilename = self.configfile.outputDirectory / Path(channelOutfile + '.meta.json')
+        postsFilename = self.configfile.outputDirectory / Path(channelOutfile + '.data.json')
+        header = ChannelHeader(channel=channel, team=team)
 
+        headerExists = headerFilename.is_file()
+        with open(headerFilename, 'r+' if headerExists else 'w') as headerFile:
+            if headerExists:
+                header.load(json.load(headerFile), driver=self.driver)
+
+            if options.postLimit != 0:
+                with open(postsFilename, 'w') as output:
+                    params: Dict[str, Any] = {
+                        'timeDirection': options.downloadTimeDirection
+                    }
+                    if options.postLimit > 0:
+                        params.update(maxCount=options.postLimit)
+                    if options.postsAfterId:
+                        if options.redownload and header.lastPostTime:
+                            selectedPostTime = self.driver.getPostById(options.postsAfterId).createTime
+                            if header.lastPostTime > selectedPostTime:
+                                params.update(afterPost=header.lastPostId)
+                            else:
+                                params.update(afterPost=options.postsAfterId)
+                        else:
+                            params.update(afterPost=options.postsAfterId)
+                    elif options.redownload and header.lastPostId:
+                        params.update(afterPost=header.lastPostId)
+                    if options.postsBeforeId:
+                        params.update(beforePost=options.postsBeforeId)
+                    if options.postsAfterTime:
+                        if options.redownload and header.lastPostTime:
+                            params.update(afterTime=max(options.postsAfterTime, header.lastPostTime))
+                        else:
+                            params.update(afterTime=options.postsAfterTime)
+                    elif options.redownload and header.lastPostTime and not header.lastPostId:
+                        params.update(afterTime=header.lastPostTime)
+                    if options.postsBeforeTime:
+                        params.update(beforeTime=options.postsBeforeTime)
+
+                    if self.configfile.outputReportingProgress.mode != progress.VisualizationMode.DumbTerminal:
+                        postIndex = 1
+                        if options.postLimit != -1:
+                            postLimit = options.postLimit
+                        else:
+                            postLimit = channel.messageCount
+                        progressReporter = progress.ProgressReporter(sys.stdout, self.configfile.outputReportingProgress,
+                            contentPadding=20, contentAlignLeft=False,
+                            header='Progress: ', footer=' posts (upper limit approximate)')
+                        progressReporter.open()
+
+                    def perPost(p: Post):
+                        if self.configfile.outputReportingProgress.mode != progress.VisualizationMode.DumbTerminal:
+                            nonlocal postIndex
+                            progressReporter.update(f"{postIndex}/{postLimit}")
+                            postIndex += 1
+                        header.usedUsers.add(self.driver.getUserById(p.userId))
+                        self.enrichPost(p)
+                        if options.emojiMetadata and 'emojis' in p:
+                            for emoji in p.emojis:
+                                if isinstance(emoji, Emoji):
+                                    header.usedEmojis.add(emoji)
+                                else:
+                                    header.usedEmojis.add(self.driver.getEmojiById(cast(Id, emoji)))
+                        self.jsonDumpToFile(p.toJson(), output)
+                        output.write('\n')
+                    self.driver.processPosts(processor=perPost, channel=channel, **params)
+
+                    if self.configfile.outputReportingProgress.mode != progress.VisualizationMode.DumbTerminal:
+                        progressReporter.close()
+
+            if headerExists:
+                headerFile.seek(0)
+                headerFile.truncate()
+            self.jsonDumpToFile(header.save(), headerFile)
 
     def __call__(self):
         if not self.configfile.outputDirectory.is_dir():

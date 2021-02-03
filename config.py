@@ -9,13 +9,19 @@ from pathlib import Path
 
 
 from bo import Id, Time
+import progress
+from progress import ProgressSettings
 
 class EntityLocator:
     def __init__(self, info: dict):
-        if len(info) != 1:
-            raise ValueError
+        ok = False
         for key in info:
-            if key not in ('id', 'name', 'internalName'):
+            if key in ('id', 'name', 'internalName'):
+                if ok:
+                    raise ValueError
+                ok = True
+        else:
+            if not ok:
                 raise ValueError
         if 'id' in info:
             self.id: Id = info['id']
@@ -162,6 +168,7 @@ class ConfigFile:
     publicChannelDefaults: ChannelOptions = ChannelOptions()
 
     outputDirectory: Path = Path()
+    outputReportingProgress: ProgressSettings = ProgressSettings(mode=progress.VisualizationMode.AnsiEscapes)
     verboseStandalonePosts: bool = False
     verboseHumanFriendlyPosts: bool = False
 
@@ -179,12 +186,22 @@ def readConfig(filename: str) -> ConfigFile:
         if 'throttling' in config:
             res.throttlingLoopDelay = config['throttling']['loopDelay']
         if 'output' in config:
-            if 'directory' in config['output']:
-                res.outputDirectory = Path(config['output']['directory'])
-            if 'standalonePosts' in config['output']:
-                res.verboseStandalonePosts = config['output']['standalonePosts']
-            if 'humanFriendlyPosts' in config['output']:
-                res.verboseHumanFriendlyPosts = config['output']['humanFriendlyPosts']
+            output = config['output']
+            if 'directory' in output:
+                res.outputDirectory = Path(output['directory'])
+            if 'standalonePosts' in output:
+                res.verboseStandalonePosts = output['standalonePosts']
+            if 'humanFriendlyPosts' in output:
+                res.verboseHumanFriendlyPosts = output['humanFriendlyPosts']
+
+            if 'reportShowProgress' in output and output['reportShowProgress'] is not None:
+                if not output['reportShowProgress']:
+                    res.outputReportingProgress = dataclasses.replace(
+                        res.outputReportingProgress, mode=progress.VisualizationMode.DumbTerminal, forceMode=True)
+                else:
+                    res.outputReportingProgress = dataclasses.replace(
+                        res.outputReportingProgress, mode=progress.VisualizationMode.AnsiEscapes, forceMode=True)
+
 
         if 'defaultChannelOptions' in config:
             res.channelDefaults = ChannelOptions().update(config['defaultChannelOptions'])
