@@ -4,12 +4,7 @@
 
 ### feat
 
-- collecting used emoji and used users and add them to channel metadata
-- support for downloading emojis and files
-- support for downloading avatars
-- time intervals for post download
-  - store channel header after messages, keep metadata so messages from channel firstMessage..lastSavedMessage won't need to be resend
-  - implement for private channels
+- support incremental download - keep metadata so messages from channel firstMessage..lastSavedMessage won't need to be resend
 
 ## 1.0
 

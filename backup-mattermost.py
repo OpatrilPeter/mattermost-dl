@@ -15,6 +15,11 @@ argumentParser.add_argument('--conf','-c', help='Configuration JSON file. For al
 argumentParser.add_argument('--verbose','-v', help='Verbose mode.', action='store_true')
 args = argumentParser.parse_args()
 
-logging.getLogger().setLevel(logging.DEBUG if args.verbose else logging.INFO)
+conffile = readConfig(args.conf)
 
-Saver(readConfig(args.conf))()
+if args.verbose:
+    conffile.verboseMode = True
+
+logging.getLogger().setLevel(logging.DEBUG if conffile.verboseMode else logging.INFO)
+
+Saver(conffile)()

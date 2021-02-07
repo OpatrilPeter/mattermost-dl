@@ -168,9 +168,13 @@ class ConfigFile:
     publicChannelDefaults: ChannelOptions = ChannelOptions()
 
     outputDirectory: Path = Path()
-    outputReportingProgress: ProgressSettings = ProgressSettings(mode=progress.VisualizationMode.AnsiEscapes)
-    verboseStandalonePosts: bool = False
+    # verboseStandalonePosts: bool = False
     verboseHumanFriendlyPosts: bool = False
+    downloadAllEmojis: bool = False
+    downloadAvatars: bool = False
+
+    verboseMode: bool = False
+    reportProgress: ProgressSettings = ProgressSettings(mode=progress.VisualizationMode.AnsiEscapes)
 
 # Note: types are not extensively checked, as we already have json schema for that
 def readConfig(filename: str) -> ConfigFile:
@@ -189,18 +193,23 @@ def readConfig(filename: str) -> ConfigFile:
             output = config['output']
             if 'directory' in output:
                 res.outputDirectory = Path(output['directory'])
-            if 'standalonePosts' in output:
-                res.verboseStandalonePosts = output['standalonePosts']
+            # if 'standalonePosts' in output:
+            #     res.verboseStandalonePosts = output['standalonePosts']
             if 'humanFriendlyPosts' in output:
                 res.verboseHumanFriendlyPosts = output['humanFriendlyPosts']
 
-            if 'reportShowProgress' in output and output['reportShowProgress'] is not None:
-                if not output['reportShowProgress']:
-                    res.outputReportingProgress = dataclasses.replace(
-                        res.outputReportingProgress, mode=progress.VisualizationMode.DumbTerminal, forceMode=True)
+        if 'report' in config:
+            reportingOptions = config['report']
+
+            if 'verbose' in reportingOptions and reportingOptions['verbose']:
+                res.verboseMode = True
+            if 'showProgress' in reportingOptions and reportingOptions['showProgress'] is not None:
+                if not reportingOptions['showProgress']:
+                    res.reportProgress = dataclasses.replace(
+                        res.reportProgress, mode=progress.VisualizationMode.DumbTerminal, forceMode=True)
                 else:
-                    res.outputReportingProgress = dataclasses.replace(
-                        res.outputReportingProgress, mode=progress.VisualizationMode.AnsiEscapes, forceMode=True)
+                    res.reportProgress = dataclasses.replace(
+                        res.reportProgress, mode=progress.VisualizationMode.AnsiEscapes, forceMode=True)
 
 
         if 'defaultChannelOptions' in config:
@@ -236,5 +245,10 @@ def readConfig(filename: str) -> ConfigFile:
                     ChannelSpec(userChannel, res.directChannelDefaults)
                     for userChannel in config['users']
                 ]
+
+        if 'downloadAllEmojis' in config and config['downloadAllEmojis']:
+            res.downloadAllEmojis = True
+        if 'downloadAvatars' in config and config['downloadAvatars']:
+            res.downloadAvatars = True
 
     return res

@@ -9,6 +9,7 @@ from enum import Enum
 from functools import total_ordering
 import logging
 from numbers import Number
+from pathlib import Path
 from typing import Any, Dict, List, NewType, Optional, Union
 
 @total_ordering
@@ -91,6 +92,18 @@ class JsonMessage:
             else:
                 self.misc = newMisc
 
+    def __hash__(self) -> int:
+        if hasattr(self, 'id'):
+            return hash(getattr(self, 'id'))
+        else:
+            return super().__hash__()
+
+    def __eq__(self, other) -> bool:
+        if hasattr(self, 'id'):
+            return getattr(self, 'id') == getattr(other, 'id')
+        else:
+            return super().__eq__(other)
+
 class User(JsonMessage):
     def __init__(self, info: dict):
         super().__init__(info)
@@ -112,6 +125,7 @@ class User(JsonMessage):
         x = self.extract('delete_at')
         if x != 0:
             self.deleteTime: Time = Time(x)
+        self.avatarFilename: str # Not fetched
         x = self.extract_or('last_picture_update', 0)
         if x != 0 and x != self.createTime.timestamp:
             self.updateAvatarTime = Time(x)
@@ -145,10 +159,9 @@ class Emoji(JsonMessage):
 
         self.id: Id = self.extract('id')
         self.creatorId: Id = self.extract('creator_id')
-        self.creator: User # Redundant, optional
         self.creatorName: str # Redundant, optional
         self.name: str = self.extract('name')
-        self.imageUrl: str
+        self.imageFileName: str # Filename used for storage if file gets downloaded
         self.createTime: Time = Time(self.extract('create_at'))
         x = self.extract('update_at')
         if x != self.createTime.timestamp:
@@ -167,9 +180,8 @@ class FileAttachment(JsonMessage):
 
         self.id: Id = self.extract('id')
         self.name: str = self.extract('name')
-        self.url: str
         self.byteSize: int = self.extract('size')
-        self.mimeType: int = self.extract('mime_type')
+        self.mimeType: str = self.extract('mime_type')
         self.createTime: Time = Time(self.extract('create_at'))
         x = self.extract('update_at')
         if x != self.createTime.timestamp:
@@ -229,7 +241,10 @@ class Post(JsonMessage):
         # Parent post (if this post is a reply)
         x = self.extract_or('parent_id', 0)
         if x:
-            self.parent: Id = x
+            self.parentPostId: Id = x
+        x = self.extract_or('root_id', 0)
+        if x and (not hasattr(self, 'parentPostId') or x != self.parentPostId):
+            self.rootPostId: Id = x
         if self.extract_or('is_pinned', False):
             self.isPinned: bool = True
         x = self.extract('type')
@@ -272,7 +287,8 @@ class Post(JsonMessage):
             self.misc['metadata'] = metadata
 
         self.drop('channel_id')
-        self.drop('root_id')
+        # Redundant as we can reach the root by following a chain of parent posts
+        # self.drop('root_id')
         self.drop('reply_count')
         self.drop('has_reactions')
         # Deprecated form of file attachment metadata
@@ -297,9 +313,8 @@ class ChannelType(Enum):
         for member in cls:
             if member.value == info:
                 return member
-        else:
-            logging.warning(f"Unknown channel type '{info}', assumed open.")
-            return ChannelType.Open
+        logging.warning(f"Unknown channel type '{info}', assumed open.")
+        return ChannelType.Open
 
     def toJson(self) -> str:
         return self.name
@@ -336,6 +351,7 @@ class Channel(JsonMessage):
 
         self.drop('team_id')
         self.drop('extra_update_at')
+        self.drop('group_constrained')
 
         self.cleanMisc()
 
@@ -353,9 +369,8 @@ class TeamType(Enum):
         for member in cls:
             if member.value == info:
                 return member
-        else:
-            logging.warning(f"Unknown team type '{info}', assumed open.")
-            return TeamType.Open
+        logging.warning(f"Unknown team type '{info}', assumed open.")
+        return TeamType.Open
 
     def toJson(self) -> str:
         return self.name

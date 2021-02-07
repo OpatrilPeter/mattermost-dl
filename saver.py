@@ -1,8 +1,10 @@
 
 import json
-from pprint import pprint as pp
+from mimetypes import guess_extension
+import os
 from pathlib import Path
-from typing import cast, Optional, Set, Tuple
+import re
+from typing import Callable, Collection, Iterable, TypeVar, cast, Optional, Set, Tuple
 import sys
 
 from bo import *
@@ -17,8 +19,10 @@ class ChannelRequest:
 
 @dataclass(init=False)
 class ChannelHeader:
+    firstPostTime: Optional[Time]
+    firstPostId: Optional[Id]
     # If set, posts from the start of the channel up to this time are archived
-    lastPostTime: Time
+    lastPostTime: Optional[Time]
     # If set, posts from the start of the channel up to this post id are archived
     lastPostId: Optional[Id]
     # Users that appeared in conversations
@@ -31,7 +35,9 @@ class ChannelHeader:
     def __init__(self, channel: Channel, team: Team = None):
         self.channel: Channel = channel
         self.team = team
-        self.lastPostTime = Time(0)
+        self.firstPostTime = None
+        self.firstPostId = None
+        self.lastPostTime = None
         self.lastPostId = None
         self.usedUsers = set()
         self.usedEmojis = set()
@@ -40,10 +46,17 @@ class ChannelHeader:
         '''
             Loading previously saved header.
         '''
-        if 'lastPostTime' in info:
-            self.lastPostTime = Time(info['lastPostTime'])
-        if 'lastPostId' in info:
-            self.lastPostId = Id(info['lastPostId'])
+        if 'storage' in info:
+            storageInfo = info['storage']
+            self.firstPostTime: Optional[Time] = Time(storageInfo['firstPostTime'])
+            self.firstPostId: Optional[Id] = storageInfo['fistPostId']
+            self.lastPostTime: Optional[Time] = Time(storageInfo['lastPostTime'])
+            self.lastPostId: Optional[Id] = Id(storageInfo['lastPostId'])
+        else:
+            self.firstPostTime = None
+            self.firstPostId = None
+            self.lastPostTime = None
+            self.lastPostId = None
         if 'users' in info:
             # TODO: load users from json
             for userInfo in info['users']:
@@ -54,28 +67,45 @@ class ChannelHeader:
                     u = driver.getUserByName(userInfo['name'])
                 if u is not None:
                     self.usedUsers.add(u)
+            # TODO: load emojis
 
     def save(self) -> dict:
         content = {}
         if self.team:
             content.update(team=self.team.toJson(includeChannels=False))
         content.update(channel=self.channel.toJson())
-        if self.lastPostId is not None:
-            content.update(lastPostId=self.lastPostId)
-        if self.lastPostTime.timestamp != 0:
-            content.update(lastPostTime=self.lastPostTime)
+        if self.firstPostId is not None:
+            content.update(storage={
+                'firstPostTime': self.firstPostTime,
+                'firstPostId': self.firstPostId,
+                'lastPostTime': self.lastPostTime,
+                'lastPostId': self.lastPostId,
+            })
         content.update(users=[u.toJson() for u in self.usedUsers])
+        content.update(emojis=[e.toJson() for e in self.usedEmojis])
 
         return content
 
 
 class Saver:
+    '''
+        Main class responsible for orchestrating the downloading process.
+        Should start from __call__ method.
+    '''
     def __init__(self, configfile: ConfigFile, driver: Optional[MattermostDriver] = None):
         if not driver:
             driver = MattermostDriver(configfile)
         self.configfile = configfile
         self.driver: MattermostDriver = driver
         self.user: User # Conveniency, fetched on call
+
+    def jsonDumpToFile(self, obj, fp):
+        def fallback(obj):
+            if hasattr(obj, 'toJson'):
+                return obj.toJson()
+            return str(obj)
+
+        json.dump(obj, fp, default=fallback, ensure_ascii=False)
 
     def getUserByLocator(self, locator: ConfigEntityLocator) -> User:
         if hasattr(locator, 'id'):
@@ -158,7 +188,7 @@ class Saver:
             publicChannels = []
             for wch in wantedChannels:
                 for ch in team.channels.values():
-                    if ch.type == ChannelType.Open and self.matchChannel(ch, wch.locator):
+                    if ch.type in (ChannelType.Open, ChannelType.Private) and self.matchChannel(ch, wch.locator):
                         publicChannels.append(ChannelRequest(config=wch.opts, metadata=ch))
                         break
                 else:
@@ -215,7 +245,7 @@ class Saver:
                         pass
                     else:
                         assert isinstance(wantedTeam.groups, list)
-                        publicChannels = getGroupChannelsForTeam(availableTeam, wantedTeam.groups)
+                        groupChannels = getGroupChannelsForTeam(availableTeam, wantedTeam.groups)
 
                     res[availableTeam] = publicChannels, groupChannels
                     break
@@ -223,82 +253,184 @@ class Saver:
                 logging.error(f'Team requested by {wantedTeam.locator} was not found!')
         return res
 
+    def storeFile(self, url: str, filename: str, directoryName: Path, suffix: Optional[str] = None, redownload: bool = False) -> str:
+        if '/' in filename:
+            logging.warning(f'Refusing to store file with name "{filename}"')
+            raise ValueError
+
+        httpResponse = self.driver.getRaw(url)
+        if suffix is None:
+            if 'content-type' in httpResponse.headers:
+                contentType = httpResponse.headers['content-type']
+                suffixIdx = contentType.find(';')
+                if suffixIdx != -1:
+                    contentType = contentType[:suffixIdx]
+                suffix = guess_extension(contentType)
+                if suffix is None:
+                    crudeParse = re.match(r'^[^/]+/(\S+)$', contentType)
+                    if crudeParse is not None:
+                        suffix = '.'+crudeParse[1]
+                    else:
+                        logging.warning(f"Can't guess extension from content type '{contentType}', leaving empty.")
+                        suffix = ''
+            else:
+                suffix = ''
+        fullFilename = directoryName / (filename + suffix)
+        if fullFilename.exists() and not redownload:
+            return filename + suffix
+        with open(fullFilename, 'wb') as output:
+            self.driver.storeUrlInto(url, output)
+        return filename + suffix
+
+    FileEntity = TypeVar('FileEntity')
+    def processFiles(self, entities: Collection[FileEntity], directoryName: str, entitiesName: str,
+            getFilenameFromEntity: Callable[[FileEntity], str], shouldDownload: Callable[[FileEntity], bool],
+            getUrlFromEntity: Callable[[FileEntity], str], storeFilename: Callable[[FileEntity, str], None],
+            getSuffixHint = (lambda e: None), redownload: bool = False):
+
+        # Note: getSuffixHint: Callable[[FileEntity], Optional[str]] can't be assigned due to type checker failure
+        if len(entities) == 0:
+            return
+
+        dirName: Path = self.configfile.outputDirectory / directoryName
+        hasFolder = dirName.is_dir()
+        if hasFolder:
+            files: Dict[str, str] = {Path(name).stem: name for name in os.listdir(dirName)}
+        else:
+            files = {}
+
+        if self.showProgressReport():
+            reporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
+                header='Progress: ', footer=f'/{len(entities)} {entitiesName} (upper limit approximate)',
+                contentPadding=6, contentAlignLeft=False)
+            reporter.open()
+            reporter.update('0')
+        else:
+            reporter = None
+
+        for i, entity in enumerate(entities):
+            filename = getFilenameFromEntity(entity)
+            if filename in files:
+                storeFilename(entity, files[filename])
+                continue
+            if not shouldDownload(entity):
+                continue
+            url = getUrlFromEntity(entity)
+
+            if not hasFolder:
+                dirName.mkdir()
+                hasFolder = True
+
+            suffix = getSuffixHint(entity)
+            storeFilename(entity, self.storeFile(
+                url=url, filename=filename, directoryName=dirName,
+                suffix=suffix, redownload=redownload))
+
+            if self.showProgressReport():
+                reporter.update(str(i+1))
+        if self.showProgressReport():
+            reporter.close()
+        logging.info(f"Processed all {entitiesName}.")
+
+    def processAttachments(self, directoryName: str, channelOpts: ChannelOptions, attachments: Collection[FileAttachment], redownload: bool = False):
+        if not channelOpts.downloadAttachments:
+            return
+        def shouldDownload(attachment: FileAttachment) -> bool:
+            return ((channelOpts.downloadAttachmentSizeLimit == 0 or attachment.byteSize <= channelOpts.downloadAttachmentSizeLimit)
+                and (len(channelOpts.downloadAttachmentTypes) == 0 or attachment.mimeType in channelOpts.downloadAttachmentTypes))
+        def storeFilename(attachment: FileAttachment, filename: str):
+            pass
+        def getSuffixHint(attachment: FileAttachment) -> Optional[str]:
+            suffix = Path(attachment.name).suffix
+            if suffix == '':
+                return None
+            else:
+                return suffix
+
+        self.processFiles(attachments, directoryName, 'files',
+            getFilenameFromEntity=lambda attachment: str(attachment.id),
+            shouldDownload=shouldDownload,
+            getUrlFromEntity=lambda attachment: self.driver.getFileUrl(attachment),
+            storeFilename=storeFilename,
+            getSuffixHint=getSuffixHint,
+            redownload=redownload
+        )
+
+    def processEmoji(self, directoryName: str, emojis: Collection[Emoji], redownload: bool = False):
+        def storeFilename(emoji: Emoji, filename: str):
+            emoji.imageFileName = filename
+        self.processFiles(emojis, directoryName, 'emojis',
+            getFilenameFromEntity=lambda e: e.name,
+            shouldDownload=lambda e: True,
+            getUrlFromEntity=lambda e: self.driver.getEmojiUrl(e),
+            storeFilename=storeFilename,
+            redownload=redownload
+        )
+
+    def processAvatars(self, directoryName: str, users: Collection[User], redownload: bool = False):
+        def storeFilename(user: User, avatarFilename: str):
+            user.avatarFilename = avatarFilename
+        self.processFiles(users, directoryName, 'user avatars',
+            getFilenameFromEntity=lambda u: u.name,
+            shouldDownload=lambda u: True,
+            getUrlFromEntity=lambda u: self.driver.getAvatarUrl(u),
+            storeFilename=storeFilename,
+            redownload=redownload
+        )
+
+    def enrichEmoji(self, emoji: Emoji):
+        if self.configfile.verboseHumanFriendlyPosts:
+            if hasattr(emoji, 'creatorId'):
+                emoji.creatorName = self.driver.getUserById(emoji.creatorId).name
+                del emoji.creatorId
+
     def enrichPostReaction(self, reaction: PostReaction):
-        if self.configfile.verboseStandalonePosts:
-            reaction.emoji = self.driver.getEmojiByName(reaction.emojiName)
-        elif self.configfile.verboseHumanFriendlyPosts:
+        if self.configfile.verboseHumanFriendlyPosts:
             reaction.userName = self.driver.getUserById(reaction.userId).name
             del reaction.userId
 
-    def enrichEmoji(self, emoji: Emoji):
-        if self.configfile.verboseStandalonePosts or self.configfile.verboseHumanFriendlyPosts:
-            emoji.imageUrl = self.driver.getEmojiUrl(emoji)
-        if self.configfile.verboseStandalonePosts:
-            emoji.creator = self.driver.getUserById(emoji.creatorId)
-        elif self.configfile.verboseHumanFriendlyPosts:
-            emoji.creatorName = self.driver.getUserById(emoji.creatorId).name
-            del emoji.creatorId
-
     # Note: the post gets mutated, so we better not pass persistent copy
     def enrichPost(self, post: Post):
-        if self.configfile.verboseStandalonePosts:
-            post.user = self.driver.getUserById(post.userId)
-        elif self.configfile.verboseHumanFriendlyPosts:
+        if self.configfile.verboseHumanFriendlyPosts:
             post.userName = self.driver.getUserById(post.userId).name
             del post.id
+            del post.userId
         if hasattr(post, 'attachments'):
-            for file in post.attachments:
-                if self.configfile.verboseStandalonePosts or self.configfile.verboseHumanFriendlyPosts:
-                    file.url = self.driver.getFileUrl(file)
-                if self.configfile.verboseHumanFriendlyPosts:
-                    del file.id
+            if self.configfile.verboseHumanFriendlyPosts:
+                for file in post.attachments:
+                    if hasattr(file, 'id'):
+                        del file.id
         if hasattr(post, 'reactions'):
             for reaction in post.reactions:
                 self.enrichPostReaction(reaction)
 
+    def showProgressReport(self) -> bool:
+        return (not self.configfile.verboseMode
+            and self.configfile.reportProgress.mode != progress.VisualizationMode.DumbTerminal)
 
-    def jsonDumpToFile(self, obj, fp):
-        json.dump(obj, fp, default=lambda obj: obj.toJson(), ensure_ascii=False)
-
-    def processDirectChannel(self, otherUser: User, channelRequest: ChannelRequest):
+    def processChannel(self, channelOutfile: str, header: ChannelHeader, channelRequest: ChannelRequest):
         channel, options = channelRequest.metadata, channelRequest.config
-        logging.debug(f"Processing conversation with {otherUser.name} ...")
 
-        directChannelOutfile = f'{self.user.name}-{otherUser.name}'
+        headerFilename = self.configfile.outputDirectory / (channelOutfile + '.meta.json')
+        postsFilename = self.configfile.outputDirectory / (channelOutfile + '.data.json')
 
-        with open(self.configfile.outputDirectory / Path(directChannelOutfile + '.meta.json'), 'w') as output:
-            content = {
-                'channel': channel.toJson(),
-                'users': [self.user.toJson(), otherUser.toJson()]
-            }
-            self.jsonDumpToFile(content, output)
-        with open(self.configfile.outputDirectory / Path(directChannelOutfile + '.data.json'), 'w') as output:
-            def perPost(p: Post):
-                self.enrichPost(p)
-                self.jsonDumpToFile(p.__dict__, output)
-                output.write('\n')
-            self.driver.processPosts(processor=perPost, channel=channel)
-
-    def processPublicChannel(self, team: Team, channelRequest: ChannelRequest):
-        channel, options = channelRequest.metadata, channelRequest.config
-        if channel.type == ChannelType.Group:
-            userlist = '-'.join(sorted(u.name for u in channel.members))
-            logging.info(f"Processing group chat {team.internalName}/{userlist} ...")
-            channelOutfile = f'{team.internalName}--{userlist}'
-        else:
-            logging.info(f"Processing channel {team.internalName}/{channel.internalName} ...")
-            channelOutfile = f'{team.internalName}--{channel.internalName}'
-
-        headerFilename = self.configfile.outputDirectory / Path(channelOutfile + '.meta.json')
-        postsFilename = self.configfile.outputDirectory / Path(channelOutfile + '.data.json')
-        header = ChannelHeader(channel=channel, team=team)
+        attachments: List[FileAttachment] = []
 
         headerExists = headerFilename.is_file()
+
         with open(headerFilename, 'r+' if headerExists else 'w') as headerFile:
             if headerExists:
-                header.load(json.load(headerFile), driver=self.driver)
+                try:
+                    header.load(json.load(headerFile), driver=self.driver)
+                except json.JSONDecodeError as err:
+                    logging.warning(f"Unable to load previously saved metadata for channel {channel.internalName}, generating from scratch.\nError: {err}")
 
             if options.postLimit != 0:
+                postIndex: int = 0
+                if options.postLimit != -1:
+                    estimatedPostLimit: int = options.postLimit
+                else:
+                    estimatedPostLimit: int = channel.messageCount
                 with open(postsFilename, 'w') as output:
                     params: Dict[str, Any] = {
                         'timeDirection': options.downloadTimeDirection
@@ -328,41 +460,92 @@ class Saver:
                     if options.postsBeforeTime:
                         params.update(beforeTime=options.postsBeforeTime)
 
-                    if self.configfile.outputReportingProgress.mode != progress.VisualizationMode.DumbTerminal:
-                        postIndex = 1
-                        if options.postLimit != -1:
-                            postLimit = options.postLimit
-                        else:
-                            postLimit = channel.messageCount
-                        progressReporter = progress.ProgressReporter(sys.stdout, self.configfile.outputReportingProgress,
-                            contentPadding=20, contentAlignLeft=False,
+                    if self.showProgressReport():
+                        progressReporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
+                            contentPadding=10, contentAlignLeft=False,
                             header='Progress: ', footer=' posts (upper limit approximate)')
                         progressReporter.open()
+                        progressReporter.update(f'0/{estimatedPostLimit}')
+                    else:
+                        progressReporter = None
+
+                    takeEmojis: bool = options.emojiMetadata or options.downloadEmoji
 
                     def perPost(p: Post):
-                        if self.configfile.outputReportingProgress.mode != progress.VisualizationMode.DumbTerminal:
-                            nonlocal postIndex
-                            progressReporter.update(f"{postIndex}/{postLimit}")
-                            postIndex += 1
+                        nonlocal postIndex
+
                         header.usedUsers.add(self.driver.getUserById(p.userId))
+                        if options.downloadAttachments and hasattr(p, 'attachments'):
+                            for attachment in p.attachments:
+                                attachments.append(attachment)
                         self.enrichPost(p)
-                        if options.emojiMetadata and 'emojis' in p:
-                            for emoji in p.emojis:
-                                if isinstance(emoji, Emoji):
+                        if hasattr(p, 'emojis'):
+                            if takeEmojis:
+                                for emoji in p.emojis:
+                                    assert isinstance(emoji, Emoji)
                                     header.usedEmojis.add(emoji)
-                                else:
-                                    header.usedEmojis.add(self.driver.getEmojiById(cast(Id, emoji)))
+                                p.emojis = [cast(Emoji, emoji).id for emoji in p.emojis]
+                            else:
+                                del p.emojis
                         self.jsonDumpToFile(p.toJson(), output)
                         output.write('\n')
+
+                        postIndex += 1
+                        if self.showProgressReport():
+                            progressReporter.update(f"{postIndex}/{estimatedPostLimit}")
+
                     self.driver.processPosts(processor=perPost, channel=channel, **params)
 
-                    if self.configfile.outputReportingProgress.mode != progress.VisualizationMode.DumbTerminal:
+                    if self.showProgressReport():
                         progressReporter.close()
+                    logging.info('Processed all posts.')
+
+            if options.emojiMetadata:
+                for emoji in header.usedEmojis:
+                    self.enrichEmoji(emoji)
+            if options.downloadEmoji and not self.configfile.downloadAllEmojis:
+                self.processEmoji('emojis', emojis=header.usedEmojis)
+
+            if options.downloadAttachments:
+                self.processAttachments(channelOutfile+'--files', channelOpts=options, attachments=attachments)
+
+            if self.configfile.downloadAvatars:
+                self.processAvatars('avatars', users=header.usedUsers)
 
             if headerExists:
                 headerFile.seek(0)
                 headerFile.truncate()
             self.jsonDumpToFile(header.save(), headerFile)
+
+
+    def processDirectChannel(self, otherUser: User, channelRequest: ChannelRequest):
+        # channel, options = channelRequest.metadata, channelRequest.config
+        logging.debug(f"Processing conversation with {otherUser.name} ...")
+
+        directChannelOutfile = f'{self.user.name}-{otherUser.name}'
+        header = ChannelHeader(channel=channelRequest.metadata)
+        header.usedUsers = {self.user, otherUser}
+
+        self.processChannel(channelOutfile=directChannelOutfile, header=header, channelRequest=channelRequest)
+
+    def processPublicChannel(self, team: Team, channelRequest: ChannelRequest):
+        '''
+            Processes public, private and group channels
+        '''
+        channel, options = channelRequest.metadata, channelRequest.config
+        if channel.type == ChannelType.Group:
+            if not hasattr(channel, 'members'):
+                self.driver.loadChannelMembers(channel)
+            userlist = '-'.join(sorted(u.name for u in channel.members))
+            logging.info(f"Processing group chat {team.internalName}/{userlist} ...")
+            channelOutfile = f'{team.internalName}--{userlist}'
+        else:
+            logging.info(f"Processing channel {team.internalName}/{channel.internalName} ...")
+            channelOutfile = f'{team.internalName}--{channel.internalName}'
+
+        header = ChannelHeader(channel=channel, team=team)
+
+        self.processChannel(channelOutfile=channelOutfile, header=header, channelRequest=channelRequest)
 
     def __call__(self):
         if not self.configfile.outputDirectory.is_dir():
@@ -381,6 +564,12 @@ class Saver:
         for team in teams.values():
             m.loadChannels(teamId=team.id)
 
+        if self.configfile.downloadAllEmojis:
+            emojis = self.driver.getEmojiList()
+            for emoji in emojis:
+                self.enrichEmoji(emoji)
+            self.processEmoji('emojis', emojis)
+
         directChannels = self.getWantedDirectChannels()
         teamChannels = self.getWantedPerTeamChannels()
         for user, channel in directChannels.items():
@@ -391,3 +580,4 @@ class Saver:
                 self.processPublicChannel(team, channel)
             for channel in groupChannels:
                 self.processPublicChannel(team, channel)
+

@@ -3,6 +3,7 @@
     working in interactive and noninteractive environment.
 '''
 
+from copy import copy
 from dataclasses import dataclass
 from enum import Enum
 from time import clock
@@ -20,10 +21,9 @@ class ProgressSettings:
 class ProgressReporter:
     def __init__(self, io: TextIO, settings: ProgressSettings = ProgressSettings(), header: str = '', footer: str = '', contentPadding: int = 0, contentAlignLeft: bool = True):
         self.io: TextIO = io
-        self.settings: ProgressSettings = settings
+        self.settings: ProgressSettings = copy(settings)
         self.header: str = header
-        self.content: str = ''
-        self.contentPadding: int = 0
+        self.contentPadding: int = contentPadding
         self.contentAlignLeft: bool = contentAlignLeft
         self.footer: str = footer
 
@@ -35,12 +35,12 @@ class ProgressReporter:
             self.io.write(self.header+'\x1b[s')
             self.io.flush()
     def update(self, content: str, redraw: bool = False):
-        padding = min(self.contentPadding-len(content), 0)
+        padding = max(self.contentPadding-len(content), 0)
         if padding:
             if self.contentAlignLeft:
-                paddedContent = ' '*padding + content
-            else:
                 paddedContent = content + ' '*padding
+            else:
+                paddedContent = ' '*padding + content
         else:
             paddedContent = content
         if self.settings.mode == VisualizationMode.DumbTerminal:
@@ -50,7 +50,6 @@ class ProgressReporter:
                 self.open()
             self.io.write('\x1b[u'+paddedContent+self.footer+'\x1b[0K')
             self.io.flush()
-        self.content = content
     def close(self):
         if self.settings.mode == VisualizationMode.AnsiEscapes:
             # Move to start of new line

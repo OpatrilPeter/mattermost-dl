@@ -143,15 +143,13 @@ class MattermostDriver:
         for team in teams.values():
             if team.name == name:
                 return team
-        else:
-            raise KeyError
+        raise KeyError
     def getTeamByIntenalName(self, name: str) -> Team:
         teams = self.getTeams()
         for team in teams.values():
             if team.internalName == name:
                 return team
-        else:
-            raise KeyError
+        raise KeyError
 
     def loadChannels(self, teamId: Id = None):
         if not teamId:
@@ -173,8 +171,7 @@ class MattermostDriver:
         for channel in self.cache.teams[teamId].channels.values():
             if channel.name == name:
                 return channel
-        else:
-            raise KeyError
+        raise KeyError
 
     def getDirectChannelNameByUserId(self, otherUserId: Id):
         localUserId = self.context['userId']
@@ -192,8 +189,7 @@ class MattermostDriver:
         for channel in self.cache.teams[teamId].channels.values():
             if channel.type == ChannelType.Direct and channel.internalName == channelName:
                 return channel
-        else:
-            raise KeyError
+        raise KeyError
 
     def getUserIdFromDirectChannelName(self, channelName: str) -> Id:
         '''
@@ -301,12 +297,12 @@ class MattermostDriver:
             if timeDirection == OrderDirection.Desc:
                 for postId in postWindow['order'][pageOffset:]:
                     p = postWindow['posts'][postId]
-                    if ((beforePost and p['id'] == beforePost)
-                        or (beforeTime and p['create_at'] >= beforeTime)
+                    if ((afterPost and p['id'] == afterPost)
+                        or (afterTime and p['create_at'] < afterTime.timestamp)
                         or (maxCount and postsProcessed == maxCount)):
                         finished = True
                         break
-                    if afterTime and p['create_at'] < afterTime:
+                    if beforeTime and p['create_at'] >= beforeTime.timestamp:
                         continue
                     processor(Post(p))
                     postsProcessed += 1
@@ -314,11 +310,11 @@ class MattermostDriver:
                 for postId in reversed(postWindow['order'][:len(postWindow['order'])-pageOffset]):
                     p = postWindow['posts'][postId]
                     if ((beforePost and p['id'] == beforePost)
-                        or (afterTime and p['create_at'] <= afterTime)
+                        or (beforeTime and p['create_at'] > beforeTime.timestamp)
                         or (maxCount and postsProcessed == maxCount)):
                         finished = True
                         break
-                    if beforeTime and p ['create_at'] > beforeTime:
+                    if afterTime and p['create_at'] <= afterTime.timestamp:
                         continue
                     processor(Post(p))
                     postsProcessed += 1
@@ -392,8 +388,7 @@ class MattermostDriver:
         for emoji in self.cache.emojis.values():
             if emoji.name == emojiName:
                 return emoji
-        else:
-            raise KeyError
+        raise KeyError
 
     def getEmojiUrl(self, emoji: Emoji) -> str:
         return f'emoji/{emoji.id}/image'
