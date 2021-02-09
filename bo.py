@@ -8,9 +8,7 @@ from dataclasses import dataclass, field as dataclassfield
 from enum import Enum
 from functools import total_ordering
 import logging
-from numbers import Number
-from pathlib import Path
-from typing import Any, Dict, List, NewType, Optional, Union
+from typing import Any, Dict, List, NewType, Optional, Sized, Union, cast
 
 @total_ordering
 class Time:
@@ -46,9 +44,10 @@ class Time:
 
 Id = NewType('Id', str)
 
+@dataclass
 class JsonMessage:
-    def __init__(self, info: dict):
-        self.misc = info
+    # All otherwise unknown fields
+    misc: Dict[str, Any]
 
     def drop(self, attrName: str):
         if attrName in self.misc:
@@ -58,8 +57,6 @@ class JsonMessage:
         assert attrName in self.misc
         res = self.misc[attrName]
         del self.misc[attrName]
-        if len(self.misc) == 0:
-            del self.misc
         return res
 
     def extract_or(self, attrName: str, fallback: Any) -> Any:
@@ -70,33 +67,24 @@ class JsonMessage:
             return res
         else:
             return fallback
-    def __repr__(self):
-        return f'{type(self).__name__}({ {key: val for key, val in self.__dict__.items() if not hasattr(val, "__call__")} })'
 
-    def toJson(self) -> Any:
-        return self.__dict__
+    # def __repr__(self):
+    #     return f'{type(self).__name__}({ {key: val for key, val in self.__dict__.items() if not hasattr(val, "__call__")} })'
+
+    def toJson(self) -> dict:
+        return {key: value for key, value in self.__dict__.items() if value is not None
+            and (not isinstance(value, Sized) or len(value) != 0)}
 
     def cleanMisc(self):
         '''
-            Removes stuff from unknown post data that seem like default values.
+            Removes stuff from unknown data that seem like default values.
         '''
-        if hasattr(self, 'misc'):
-            newMisc = {key: value for key, value in self.misc.items()
-                if not (
-                    value is None
-                    or value == ''
-                    or (isinstance(value, dict) and len(value) == 0))
-            }
-            if len(newMisc) == 0:
-                del self.misc
-            else:
-                self.misc = newMisc
-
-    def __hash__(self) -> int:
-        if hasattr(self, 'id'):
-            return hash(getattr(self, 'id'))
-        else:
-            return super().__hash__()
+        self.misc = {key: value for key, value in self.misc.items()
+            if not (
+                value is None
+                or value == ''
+                or (isinstance(value, dict) and len(value) == 0))
+        }
 
     def __eq__(self, other) -> bool:
         if hasattr(self, 'id'):
@@ -104,174 +92,257 @@ class JsonMessage:
         else:
             return super().__eq__(other)
 
+@dataclass
 class User(JsonMessage):
-    def __init__(self, info: dict):
-        super().__init__(info)
+    id: Id
+    name: str
+    firstName: str
+    lastName: str
+    createTime: Time
+    updateTime: Optional[Time] = None
+    deleteTime: Optional[Time] = None
+    nickname: Optional[str] = None
+    updateAvatarTime: Optional[Time] = None
+    position: Optional[str] = None
+    roles: List[str] = dataclassfield(default_factory=list)
+    avatarFilename: Optional[str] = None
 
-        x: Any
+    def __hash__(self):
+        return hash(self.id)
 
-        self.id: Id = self.extract('id')
-        self.name: str = self.extract('username')
-        x = self.extract('nickname')
+    @classmethod
+    def fromMattermost(cls, info: dict):
+        u: User = cast(User, JsonMessage(misc=info))
+        u.id = u.extract('id')
+        u.name = u.extract('username')
+        x = u.extract('nickname')
         if x:
-            self.nickname: str = x
-        self.firstName: str = self.extract('first_name')
-        self.lastName: str = self.extract('last_name')
+            u.nickname = x
+        u.firstName = u.extract('first_name')
+        u.lastName = u.extract('last_name')
 
-        self.createTime: Time = Time(self.extract('create_at'))
-        x = self.extract('update_at')
-        if x != self.createTime.timestamp:
-            self.updateTime: Time = Time(x)
-        x = self.extract('delete_at')
+        u.createTime = Time(u.extract('create_at'))
+        x = u.extract('update_at')
+        if x != u.createTime.timestamp:
+            u.updateTime = Time(x)
+        x = u.extract('delete_at')
         if x != 0:
-            self.deleteTime: Time = Time(x)
-        self.avatarFilename: str # Not fetched
-        x = self.extract_or('last_picture_update', 0)
-        if x != 0 and x != self.createTime.timestamp:
-            self.updateAvatarTime = Time(x)
-        x = self.extract('position')
+            u.deleteTime = Time(x)
+        x = u.extract_or('last_picture_update', 0)
+        if x != 0 and x != u.createTime.timestamp:
+            u.updateAvatarTime = Time(x)
+        x = u.extract('position')
         if x:
-            self.position: str = x
+            u.position = x
 
-
-        x = self.extract('roles').split(' ')
+        x = u.extract('roles').split(' ')
         if 'system_user' in x and len(x) == 1:
             pass
         else:
-            self.roles: List[str] = x
+            u.roles = x
 
         # Things we explicitly don't care about
-        self.drop('locale')
-        self.drop('timezone')
-        self.drop('notify_props')
-        self.drop('email')
-        self.drop('email_verified')
-        self.drop('auth_service')
-        self.drop('last_password_update')
+        u.drop('locale')
+        u.drop('timezone')
+        u.drop('notify_props')
+        u.drop('email')
+        u.drop('email_verified')
+        u.drop('auth_service')
+        u.drop('last_password_update')
 
-        self.cleanMisc()
+        u.cleanMisc()
+        return cls(**u.__dict__)
 
+@dataclass
 class Emoji(JsonMessage):
-    def __init__(self, info: dict):
-        super().__init__(info)
+    id: Id
+    creatorId: Id
+    name: str
+    createTime: Time
+    updateTime: Optional[Time] = None
+    deleteTime: Optional[Time] = None
+    creatorName: Optional[str] = None # Redundant
+    imageFileName: Optional[str] = None # Filename used for storage if file gets downloaded
+
+    def __hash__(self):
+        return hash(self.id)
+
+    @classmethod
+    def fromMattermost(cls, info: dict):
+        e = cast(Emoji, JsonMessage(misc=info))
 
         x: Any
 
-        self.id: Id = self.extract('id')
-        self.creatorId: Id = self.extract('creator_id')
-        self.creatorName: str # Redundant, optional
-        self.name: str = self.extract('name')
-        self.imageFileName: str # Filename used for storage if file gets downloaded
-        self.createTime: Time = Time(self.extract('create_at'))
-        x = self.extract('update_at')
-        if x != self.createTime.timestamp:
-            self.updateTime: Time = Time(x)
-        x = self.extract('delete_at')
+        e.id = e.extract('id')
+        e.creatorId = e.extract('creator_id')
+        e.name = e.extract('name')
+        e.createTime = Time(e.extract('create_at'))
+        x = e.extract('update_at')
+        if x != e.createTime.timestamp:
+            e.updateTime = Time(x)
+        x = e.extract('delete_at')
         if x != 0:
-            self.deleteTime: Time = Time(x)
+            e.deleteTime = Time(x)
 
-        self.cleanMisc()
+        e.cleanMisc()
 
+        return cls(**e.__dict__)
+
+@dataclass
 class FileAttachment(JsonMessage):
-    def __init__(self, info: dict):
-        super().__init__(info)
+    id: Id
+    name: str
+    byteSize: int
+    mimeType: str
+    createTime: Time
+    updateTime: Optional[Time] = None
+    deleteTime: Optional[Time] = None
+
+    def __hash__(self):
+        return hash(self.id)
+
+    @classmethod
+    def fromMattermost(cls, info: dict):
+        f: FileAttachment = cast(FileAttachment, JsonMessage(misc=info))
 
         x: Any
 
-        self.id: Id = self.extract('id')
-        self.name: str = self.extract('name')
-        self.byteSize: int = self.extract('size')
-        self.mimeType: str = self.extract('mime_type')
-        self.createTime: Time = Time(self.extract('create_at'))
-        x = self.extract('update_at')
-        if x != self.createTime.timestamp:
-            self.updateTime: Time = Time(x)
-        x = self.extract('delete_at')
+        f.id = f.extract('id')
+        f.name = f.extract('name')
+        f.byteSize = f.extract('size')
+        f.mimeType = f.extract('mime_type')
+        f.createTime = Time(f.extract('create_at'))
+        x = f.extract('update_at')
+        if x != f.createTime.timestamp:
+            f.updateTime = Time(x)
+        x = f.extract('delete_at')
         if x:
-            self.deleteTime: Time = Time(x)
+            f.deleteTime = Time(x)
 
         # We don't need derived properties
-        self.drop('user_id')
-        self.drop('post_id')
-        self.drop('width')
-        self.drop('height')
-        self.drop('has_preview_image')
-        self.drop('mini_preview')
-        self.drop('extension')
+        f.drop('user_id')
+        f.drop('post_id')
+        f.drop('width')
+        f.drop('height')
+        f.drop('has_preview_image')
+        f.drop('mini_preview')
+        f.drop('extension')
 
-        self.cleanMisc()
+        f.cleanMisc()
 
+        return cls(**f.__dict__)
+
+@dataclass
 class PostReaction(JsonMessage):
-    def __init__(self, info: dict):
-        super().__init__(info)
+    userId: Id
+    createTime: Time
+    emojiName: str
 
-        self.userId: Id = self.extract('user_id')
-        self.userName: str # redundant, optional
-        self.createTime: Time = Time(self.extract('create_at'))
-        self.emojiName: str = self.extract('emoji_name')
-        self.emoji: Emoji # redundant, optional
+    emoji: Optional[Emoji] = None # redundant
+    userName: Optional[str] = None # redundant
 
-        self.drop('post_id')
+    @classmethod
+    def fromMattermost(cls, info: dict):
+        r: PostReaction = cast(PostReaction, JsonMessage(misc=info))
 
-        self.cleanMisc()
+        r.userId = r.extract('user_id')
+        r.createTime = Time(r.extract('create_at'))
+        r.emojiName = r.extract('emoji_name')
+
+        r.drop('post_id')
+
+        r.cleanMisc()
+
+        return cls(**r.__dict__)
 
 @dataclass
 class Post(JsonMessage):
-    def __init__(self, info: dict):
-        super().__init__(info)
+    id: Id
+    userId: Id
+    createTime: Time
+    message: str
+
+    isPinned: Optional[bool] = None
+    updateTime: Optional[Time] = None
+    # Last "visible edit" time (small updates after posting/public update are ignored)
+    publicUpdateTime: Optional[Time] = None
+    deleteTime: Optional[Time] = None
+    # Parent post (if this post is a reply)
+    # Note: mattermost seem to disagree self and returns root
+    parentPostId: Optional[Id] = None
+    # Root of reply chain
+    rootPostId: Optional[Id] = None
+
+    specialMsgType: Optional[str] = None
+    # Set only if specialMsgType is nonempty
+    specialMsgProperties: Optional[dict] = None
+
+    # May contain emojis directly or indirectly
+    emojis: Union[List[Emoji], List[Id]] = dataclassfield(default_factory=list)
+    attachments: List[FileAttachment] = dataclassfield(default_factory=list)
+    reactions: List[PostReaction] = dataclassfield(default_factory=list)
+
+    userName: Optional[str] = None # redundant
+    user: Optional[User] = None # redundant
+
+    def __hash__(self):
+        return hash(self.id)
+
+    @classmethod
+    def fromMattermost(cls, info: dict):
+        p = cast(Post, JsonMessage(misc=info))
 
         x: Any
 
-        self.id: Id = self.extract('id')
-        self.userId: Id = self.extract('user_id')
-        self.userName: str # redundant, optional
-        self.user: User # redundant, optional
-        self.createTime: Time = Time(self.extract('create_at'))
-        self.message: str = self.extract('message')
-        x = self.extract('update_at')
-        if x != self.createTime.timestamp:
-            self.updateTime: Time = Time(x)
+        p.id = p.extract('id')
+        p.userId = p.extract('user_id')
+        p.createTime = Time(p.extract('create_at'))
+        p.message = p.extract('message')
+        x = p.extract('update_at')
+        if x != p.createTime.timestamp:
+            p.updateTime = Time(x)
         # Last "visible edit" time (small updates after posting/public update are ignored)
-        x = self.extract('edit_at')
-        if x != 0 and x != self.updateTime.timestamp:
-            self.publicUpdateTime: Time = Time(x)
-        x = self.extract('delete_at')
+        x = p.extract('edit_at')
+        if x != 0 and x != p.updateTime.timestamp:
+            p.publicUpdateTime = Time(x)
+        x = p.extract('delete_at')
         if x != 0:
-            self.deleteTime: Time = Time(x)
+            p.deleteTime = Time(x)
         # Parent post (if this post is a reply)
-        x = self.extract_or('parent_id', 0)
+        x = p.extract_or('parent_id', 0)
         if x:
-            self.parentPostId: Id = x
-        x = self.extract_or('root_id', 0)
-        if x and (not hasattr(self, 'parentPostId') or x != self.parentPostId):
-            self.rootPostId: Id = x
-        if self.extract_or('is_pinned', False):
-            self.isPinned: bool = True
-        x = self.extract('type')
+            p.parentPostId = x
+        x = p.extract_or('root_id', 0)
+        if x and (not hasattr(p, 'parentPostId') or x != p.parentPostId):
+            p.rootPostId = x
+        if p.extract_or('is_pinned', False):
+            p.isPinned = True
+        props = p.extract('props')
+        props = {key: value
+            for key, value in props.items()
+                # Drop fields that are known to be unnecessary
+                if (key not in ('disable_group_highlight', 'channel_mentions')
+                    and value != "")
+        }
+        x = p.extract('type')
         if x:
-            self.specialMsgType: str = x
-            x = self.extract('props')
-            if x:
-                self.specialMsgProperties: dict = x
-        else:
-            self.misc['props'] = {
-                key: value for key, value in self.misc['props'].items()
-                    # Drop fields that are known to be unnecessary
-                    if (key not in ('disable_group_highlight', 'channel_mentions')
-                        and value != "")
-            }
+            p.specialMsgType = x
+            if props:
+                p.specialMsgProperties = x
+        elif props:
+            p.misc['props'] = props
 
-        metadata = self.extract('metadata')
+        metadata = p.extract('metadata')
         if 'embeds' in metadata:
             # We ignore these, as there is nothing that can't be restructured from message
             del metadata['embeds']
         if 'emojis' in metadata:
-            self.emojis: Union[List[Emoji], List[Id]] = [Emoji(emoji)
+            p.emojis = [Emoji.fromMattermost(emoji)
                 for emoji in metadata['emojis']
             ]
             del metadata['emojis']
         if 'files' in metadata:
-            self.attachments: List[FileAttachment] = [FileAttachment(fileInfo)
+            p.attachments = [FileAttachment.fromMattermost(fileInfo)
                 for fileInfo in metadata['files']
             ]
             del metadata['files']
@@ -279,24 +350,26 @@ class Post(JsonMessage):
             # images only contain redundant metadata
             del metadata['images']
         if 'reactions' in metadata:
-            self.reactions: List[PostReaction] = [PostReaction(reaction)
+            p.reactions = [PostReaction.fromMattermost(reaction)
                 for reaction in metadata['reactions']
             ]
             del metadata['reactions']
         if len(metadata) != 0:
-            self.misc['metadata'] = metadata
+            p.misc['metadata'] = metadata
 
-        self.drop('channel_id')
+        p.drop('channel_id')
         # Redundant as we can reach the root by following a chain of parent posts
-        # self.drop('root_id')
-        self.drop('reply_count')
-        self.drop('has_reactions')
+        # p.drop('root_id')
+        p.drop('reply_count')
+        p.drop('has_reactions')
         # Deprecated form of file attachment metadata
-        self.drop('file_ids')
+        p.drop('file_ids')
         # Contains automatically extracted hashtags from the message (usually wrong)
-        self.drop('hashtags')
+        p.drop('hashtags')
 
-        self.cleanMisc()
+        p.cleanMisc()
+
+        return cls(**p.__dict__)
 
     def __str__(self):
         return f'Post(u={self.userId}, t={self.createTime}, m={self.message})'
@@ -319,46 +392,73 @@ class ChannelType(Enum):
     def toJson(self) -> str:
         return self.name
 
+@dataclass
 class Channel(JsonMessage):
-    def __init__(self, info: dict):
-        super().__init__(info)
+    id: Id
+    name: str
+    internalName: str
+    creationTime: Time
+    type: ChannelType
+    lastMessageTime: Time
+    messageCount: int
+
+    creatorUserId: Optional[Id] = None
+    updateTime: Optional[Time] = None
+    deletionTime: Optional[Time] = None
+    header: Optional[str] = None
+    purpose: Optional[str] = None
+
+    members: List[User] = dataclassfield(default_factory=list)
+
+    def __hash__(self):
+        return hash(self.id)
+
+    @classmethod
+    def fromMattermost(cls, info: dict):
+        ch = cast(Channel, JsonMessage(misc=info))
 
         x: Any
 
-        self.id: Id = self.extract('id')
-        self.name: str = self.extract('display_name')
-        self.internalName: str = self.extract('name')
-        self.creationTime: Time = Time(self.extract('create_at'))
-        x = self.extract('update_at')
-        if x != self.creationTime.timestamp:
-            self.updateTime: Time = Time(x)
-        x = self.extract('delete_at')
+        ch.id = ch.extract('id')
+        ch.name = ch.extract('display_name')
+        ch.internalName = ch.extract('name')
+        ch.creationTime = Time(ch.extract('create_at'))
+        x = ch.extract('update_at')
+        if x != ch.creationTime.timestamp:
+            ch.updateTime = Time(x)
+        x = ch.extract('delete_at')
         if x != 0:
-            self.deletionTime: Time = Time(x)
-        self.type: ChannelType = ChannelType.load(self.extract('type'))
-        x = self.extract('header')
+            ch.deletionTime = Time(x)
+        ch.type = ChannelType.load(ch.extract('type'))
+        x = ch.extract('header')
         if x:
-            self.header: str = x
-        x = self.extract('purpose')
+            ch.header = x
+        x = ch.extract('purpose')
         if x:
-            self.purpose: str = x
+            ch.purpose = x
 
-        self.lastMessageTime: Time = Time(self.extract('last_post_at'))
-        self.messageCount: int = self.extract('total_msg_count')
-        x = self.extract('creator_id')
+        ch.lastMessageTime = Time(ch.extract('last_post_at'))
+        ch.messageCount = ch.extract('total_msg_count')
+        x = ch.extract('creator_id')
         if x:
-            self.creatorUserId: Id = x
+            ch.creatorUserId = x
 
-        self.drop('team_id')
-        self.drop('extra_update_at')
-        self.drop('group_constrained')
+        ch.drop('team_id')
+        ch.drop('extra_update_at')
+        ch.drop('group_constrained')
 
-        self.cleanMisc()
+        ch.cleanMisc()
 
-        self.members: List[User]
+        return cls(**ch.__dict__)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f'Channel({self.internalName})'
+
+    def toJson(self, includeMembers = True) -> dict:
+        return { key: value for key, value in super().toJson().items()
+            if (includeMembers or key != 'members')
+        }
+
 
 class TeamType(Enum):
     Open = 'O'
@@ -375,47 +475,63 @@ class TeamType(Enum):
     def toJson(self) -> str:
         return self.name
 
-
+@dataclass
 class Team(JsonMessage):
-    def __init__(self, info: dict) -> None:
-        super().__init__(info)
+    id: Id
+    name: str
+    internalName: str
+    type: TeamType
+    createTime: Time
+    updateTime: Optional[Time] = None
+    deleteTime: Optional[Time] = None
+    description: Optional[str] = None
+    updateAvatarTime: Optional[Time] = None
+    inviteId: Optional[Id] = None
+
+    channels: Dict[Id, Channel] = dataclassfield(default_factory=dict)
+
+    def __hash__(self):
+        return hash(self.id)
+
+    @classmethod
+    def fromMattermost(cls, info: dict):
+        t = cast(Team, JsonMessage(misc=info))
 
         x: Any
 
-        self.id: Id = self.extract('id')
-        self.name: str = self.extract('display_name')
-        self.internalName: str = self.extract('name')
-        self.type: TeamType = TeamType(self.extract('type'))
-        self.createTime: Time = Time(self.extract('create_at'))
-        x = self.extract('update_at')
-        if x != self.createTime.timestamp:
-            self.updateTime: Time = Time(x)
-        x = self.extract('delete_at')
+        t.id = t.extract('id')
+        t.name = t.extract('display_name')
+        t.internalName = t.extract('name')
+        t.type = TeamType(t.extract('type'))
+        t.createTime = Time(t.extract('create_at'))
+        x = t.extract('update_at')
+        if x != t.createTime.timestamp:
+            t.updateTime = Time(x)
+        x = t.extract('delete_at')
         if x:
-            self.deleteTime: Time = Time(x)
-        x = self.extract('description')
+            t.deleteTime = Time(x)
+        x = t.extract('description')
         if x:
-            self.description: str = x
+            t.description = x
 
-        x = self.extract_or('last_team_icon_update', 0)
-        if x != 0 and x != self.createTime.timestamp:
-            self.updateAvatarTime = Time(x)
+        x = t.extract_or('last_team_icon_update', 0)
+        if x != 0 and x != t.createTime.timestamp:
+            t.updateAvatarTime = Time(x)
 
-        x = self.extract('invite_id')
+        x = t.extract('invite_id')
         if x:
-            self.inviteId: Id = x
+            t.inviteId = x
 
         # Uninteresting fields for achivation
-        self.drop('allow_open_invite')
-        self.drop('allowed_domains')
+        t.drop('allow_open_invite')
+        t.drop('allowed_domains')
 
-        self.cleanMisc()
+        t.cleanMisc()
 
-        self.channels: Dict[Id, Channel] = {}
+        return cls(**t.__dict__)
 
-
-    def toJson(self, includeChannels = True):
-        return { key: value for key, value in self.__dict__.items()
+    def toJson(self, includeChannels = True) -> dict:
+        return { key: value for key, value in super().toJson().items()
             if (includeChannels or key != 'channels')
         }
 

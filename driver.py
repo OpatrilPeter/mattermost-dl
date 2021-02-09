@@ -106,7 +106,7 @@ class MattermostDriver:
 
         userInfo = self.get('users/'+id)
         assert isinstance(userInfo, dict)
-        u = User(userInfo)
+        u = User.fromMattermost(userInfo)
         self.cache.users.update({u.id: u})
         return u
 
@@ -117,7 +117,7 @@ class MattermostDriver:
 
         userInfo = self.get('users/username/'+userName)
         assert isinstance(userInfo, dict)
-        u = User(userInfo)
+        u = User.fromMattermost(userInfo)
         self.cache.users.update({u.id: u})
         return u
 
@@ -132,7 +132,7 @@ class MattermostDriver:
         teamInfos = self.get('users/{userId}/teams')
         assert isinstance(teamInfos, list)
         for teamInfo in teamInfos:
-            t = Team(teamInfo)
+            t = Team.fromMattermost(teamInfo)
             self.cache.teams.update({t.id: t})
         return self.cache.teams
 
@@ -158,7 +158,7 @@ class MattermostDriver:
         t = self.cache.teams[teamId]
         assert isinstance(channelInfos, list)
         for chInfo in channelInfos:
-            ch = Channel(chInfo)
+            ch = Channel.fromMattermost(chInfo)
             t.channels.update({ch.id: ch})
 
     def getChannelById(self, channelId: Id, teamId: Id = None) -> Channel:
@@ -202,7 +202,7 @@ class MattermostDriver:
             return Id(left)
 
     def loadChannelMembers(self, channel: Channel):
-        if hasattr(channel, 'members'):
+        if len(channel.members) != 0:
             return
 
         res = []
@@ -229,7 +229,7 @@ class MattermostDriver:
     def getPostById(self, postId: Id) -> Post:
         postInfo = self.get(f'/posts/{postId}')
         assert isinstance(postInfo, dict)
-        return Post(postInfo)
+        return Post.fromMattermost(postInfo)
 
     def processPosts(self, processor: Callable[[Post], None], channel: Channel = None, *, beforePost: Id = None, afterPost: Id = None, beforeTime: Optional[Time] = None, afterTime: Optional[Time] = None, bufferSize: int = 60, maxCount: int = 0, offset: int = 0, timeDirection: OrderDirection = OrderDirection.Asc):
         '''
@@ -304,7 +304,7 @@ class MattermostDriver:
                         break
                     if beforeTime and p['create_at'] >= beforeTime.timestamp:
                         continue
-                    processor(Post(p))
+                    processor(Post.fromMattermost(p))
                     postsProcessed += 1
             else:
                 for postId in reversed(postWindow['order'][:len(postWindow['order'])-pageOffset]):
@@ -316,8 +316,18 @@ class MattermostDriver:
                         break
                     if afterTime and p['create_at'] <= afterTime.timestamp:
                         continue
-                    processor(Post(p))
+                    processor(Post.fromMattermost(p))
                     postsProcessed += 1
+
+            # No messages recieved?
+            if len(postWindow['order']) == 0:
+                # If we iterate from the end of the list, we may simply look beyond the end as channel message count is approximate
+                # (doesn't subtract deleted messages that aren't returned for common users)
+                if timeDirection == OrderDirection.Asc and not afterPost and page != 0:
+                    page -= 1
+                    continue
+                else:
+                    return
 
             if finished or len(postWindow['order']) == 0 or (maxCount and postsProcessed >= maxCount):
                 break
@@ -358,7 +368,7 @@ class MattermostDriver:
             emojiWindow = self.get('emoji', params)
             assert isinstance(emojiWindow, list)
             for emojiInfo in emojiWindow:
-                e = Emoji(emojiInfo)
+                e = Emoji.fromMattermost(emojiInfo)
                 self.cache.emojis.update({e.id: e})
                 processor(e)
             recieved += len(emojiWindow)

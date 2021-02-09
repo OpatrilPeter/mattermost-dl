@@ -4,7 +4,7 @@ from mimetypes import guess_extension
 import os
 from pathlib import Path
 import re
-from typing import Callable, Collection, Iterable, TypeVar, cast, Optional, Set, Tuple
+from typing import Callable, Collection, TypeVar, cast, Optional, Set, Tuple
 import sys
 
 from bo import *
@@ -201,7 +201,7 @@ class Saver:
                 for ch in team.channels.values():
                     if ch.type != ChannelType.Group:
                         continue
-                    if not hasattr(ch, 'members'):
+                    if len(ch.members) == 0:
                         self.driver.loadChannelMembers(ch)
                     if self.matchGroupChannel(ch, wch.locator):
                         groupChannels.append(ChannelRequest(config=wch.opts, metadata=ch))
@@ -380,27 +380,17 @@ class Saver:
 
     def enrichEmoji(self, emoji: Emoji):
         if self.configfile.verboseHumanFriendlyPosts:
-            if hasattr(emoji, 'creatorId'):
-                emoji.creatorName = self.driver.getUserById(emoji.creatorId).name
-                del emoji.creatorId
+            emoji.creatorName = self.driver.getUserById(emoji.creatorId).name
 
     def enrichPostReaction(self, reaction: PostReaction):
         if self.configfile.verboseHumanFriendlyPosts:
             reaction.userName = self.driver.getUserById(reaction.userId).name
-            del reaction.userId
 
     # Note: the post gets mutated, so we better not pass persistent copy
     def enrichPost(self, post: Post):
         if self.configfile.verboseHumanFriendlyPosts:
             post.userName = self.driver.getUserById(post.userId).name
-            del post.id
-            del post.userId
-        if hasattr(post, 'attachments'):
-            if self.configfile.verboseHumanFriendlyPosts:
-                for file in post.attachments:
-                    if hasattr(file, 'id'):
-                        del file.id
-        if hasattr(post, 'reactions'):
+        if len(post.reactions) != 0:
             for reaction in post.reactions:
                 self.enrichPostReaction(reaction)
 
@@ -463,9 +453,9 @@ class Saver:
                     if self.showProgressReport():
                         progressReporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
                             contentPadding=10, contentAlignLeft=False,
-                            header='Progress: ', footer=' posts (upper limit approximate)')
+                            header='Progress: ', footer=f'/{estimatedPostLimit} posts (upper limit approximate)')
                         progressReporter.open()
-                        progressReporter.update(f'0/{estimatedPostLimit}')
+                        progressReporter.update(f'0')
                     else:
                         progressReporter = None
 
@@ -475,24 +465,24 @@ class Saver:
                         nonlocal postIndex
 
                         header.usedUsers.add(self.driver.getUserById(p.userId))
-                        if options.downloadAttachments and hasattr(p, 'attachments'):
+                        if options.downloadAttachments:
                             for attachment in p.attachments:
                                 attachments.append(attachment)
                         self.enrichPost(p)
-                        if hasattr(p, 'emojis'):
+                        if p.emojis:
                             if takeEmojis:
                                 for emoji in p.emojis:
                                     assert isinstance(emoji, Emoji)
                                     header.usedEmojis.add(emoji)
                                 p.emojis = [cast(Emoji, emoji).id for emoji in p.emojis]
                             else:
-                                del p.emojis
+                                p.emojis = []
                         self.jsonDumpToFile(p.toJson(), output)
                         output.write('\n')
 
                         postIndex += 1
                         if self.showProgressReport():
-                            progressReporter.update(f"{postIndex}/{estimatedPostLimit}")
+                            progressReporter.update(str(postIndex))
 
                     self.driver.processPosts(processor=perPost, channel=channel, **params)
 
@@ -520,9 +510,9 @@ class Saver:
 
     def processDirectChannel(self, otherUser: User, channelRequest: ChannelRequest):
         # channel, options = channelRequest.metadata, channelRequest.config
-        logging.debug(f"Processing conversation with {otherUser.name} ...")
+        logging.info(f"Processing conversation with {otherUser.name} ...")
 
-        directChannelOutfile = f'{self.user.name}-{otherUser.name}'
+        directChannelOutfile = f'{self.user.name}--{otherUser.name}'
         header = ChannelHeader(channel=channelRequest.metadata)
         header.usedUsers = {self.user, otherUser}
 
@@ -534,9 +524,12 @@ class Saver:
         '''
         channel, options = channelRequest.metadata, channelRequest.config
         if channel.type == ChannelType.Group:
-            if not hasattr(channel, 'members'):
+            if len(channel.members) == 0:
                 self.driver.loadChannelMembers(channel)
             userlist = '-'.join(sorted(u.name for u in channel.members))
+            if userlist == '':
+                logging.warning(f'No users for group channel {channel.id}, using id as name!')
+                userlist = str(channel.id)
             logging.info(f"Processing group chat {team.internalName}/{userlist} ...")
             channelOutfile = f'{team.internalName}--{userlist}'
         else:
