@@ -418,7 +418,7 @@ class Saver:
             if options.postLimit != 0:
                 postIndex: int = 0
                 if options.postLimit != -1:
-                    estimatedPostLimit: int = options.postLimit
+                    estimatedPostLimit: int = min(channel.messageCount, options.postLimit)
                 else:
                     estimatedPostLimit: int = channel.messageCount
                 with open(postsFilename, 'w') as output:
