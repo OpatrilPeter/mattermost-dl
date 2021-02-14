@@ -29,6 +29,7 @@ class ChannelOptions:
     downloadAttachmentSizeLimit: int = 0 # 0 means no limit
     emojiMetadata: bool = False
     downloadEmoji: bool = False
+    downloadAvatars: bool = False
 
     def update(self, info: dict):
         x: Any
@@ -50,13 +51,15 @@ class ChannelOptions:
             self.downloadTimeDirection = OrderDirection.Asc if x else OrderDirection.Desc
         if 'attachments' in info:
             attachments = info['attachments']
-            self.downloadAttachments = attachments.get('allow', self.downloadAttachments)
+            self.downloadAttachments = attachments.get('download', self.downloadAttachments)
             self.downloadAttachmentSizeLimit = attachments.get('maxSize', self.downloadAttachmentSizeLimit)
             self.downloadAttachmentTypes = attachments.get('allowedMimeTypes', self.downloadAttachmentTypes)
         if 'emojis' in info:
             emojis = info['emojis']
             self.downloadEmoji = emojis.get('download', self.downloadEmoji)
             self.emojiMetadata = emojis.get('metadata', self.emojiMetadata)
+        if 'avatars' in info and 'download' in info['avatars']:
+            self.downloadAvatars = info['avatars']['download']
 
         return self
 
@@ -133,7 +136,6 @@ class ConfigFile:
     # verboseStandalonePosts: bool = False
     verboseHumanFriendlyPosts: bool = False
     downloadAllEmojis: bool = False
-    downloadAvatars: bool = False
 
     verboseMode: bool = False
     reportProgress: ProgressSettings = ProgressSettings(mode=progress.VisualizationMode.AnsiEscapes)
@@ -215,7 +217,5 @@ def readConfig(filename: str) -> ConfigFile:
 
         if 'downloadAllEmojis' in config and config['downloadAllEmojis']:
             res.downloadAllEmojis = True
-        if 'downloadAvatars' in config and config['downloadAvatars']:
-            res.downloadAvatars = True
 
     return res

@@ -92,7 +92,7 @@
         "attachments": {
           "type": "object",
           "properties": {
-            "allow": {
+            "download": {
               "description": "Whether to download file attachments or not. Defaults to false.",
               "type": "boolean"
             },
@@ -119,6 +119,15 @@
             },
             "metadata": {
               "description": "Whether to store metadata structures for stored emoji (default) or not. If not, custom emojis are retained only in text form.",
+              "type": "boolean"
+            }
+          }
+        },
+        "avatars": {
+          "type": "object",
+          "properties": {
+            "download": {
+              "description": "Whether to download user icons (avatars) or not (default).",
               "type": "boolean"
             }
           }

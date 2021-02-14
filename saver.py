@@ -418,7 +418,7 @@ class Saver:
             if options.downloadAttachments:
                 self.processAttachments(channelOutfile+'--files', channelOpts=options, attachments=attachments)
 
-            if self.configfile.downloadAvatars:
+            if options.downloadAvatars:
                 self.processAvatars('avatars', users=header.usedUsers)
 
             if headerExists:
