@@ -1,12 +1,15 @@
-import json
-import logging
-import requests
-from time import sleep
-from typing import Any, BinaryIO, Callable, Dict, NoReturn, Optional, Union
+'''
+    Implements Mattermost driver, object that logically
+    represent (connection to) Mattermost server
+'''
 
-
+from common import *
 from bo import *
 from config import ConfigFile, OrderDirection
+
+import json
+import requests
+from time import sleep
 
 @dataclass
 class Cache:
@@ -231,7 +234,14 @@ class MattermostDriver:
         assert isinstance(postInfo, dict)
         return Post.fromMattermost(postInfo)
 
-    def processPosts(self, processor: Callable[[Post], None], channel: Channel = None, *, beforePost: Id = None, afterPost: Id = None, beforeTime: Optional[Time] = None, afterTime: Optional[Time] = None, bufferSize: int = 60, maxCount: int = 0, offset: int = 0, timeDirection: OrderDirection = OrderDirection.Asc):
+    @dataclass
+    class PostHints:
+        # This post has no predecessor
+        firstPost: bool = False
+        # This post has no successor
+        lastPost: bool = False
+
+    def processPosts(self, processor: Callable[[Post, 'MattermostDriver.PostHints'], None], channel: Channel = None, *, beforePost: Id = None, afterPost: Id = None, beforeTime: Optional[Time] = None, afterTime: Optional[Time] = None, bufferSize: int = 60, maxCount: int = 0, offset: int = 0, timeDirection: OrderDirection = OrderDirection.Asc):
         '''
             Main function to load all channel's posts.
             Loading happens lazily in batches, each post is passed to external callable.
@@ -285,7 +295,8 @@ class MattermostDriver:
                 pageOffset = offset
             assert pageOffset < bufferSize # Sanity check
 
-        postsProcessed = 0
+        postsProcessed: int = 0
+        postHints = self.PostHints()
         while True:
             if page != 0:
                 params.update(page=page)
@@ -304,7 +315,14 @@ class MattermostDriver:
                         break
                     if beforeTime and p['create_at'] >= beforeTime.timestamp:
                         continue
-                    processor(Post.fromMattermost(p))
+                    if postWindow['prev_post_id'] == '' and p['id'] == postWindow['order'][-1]:
+                        postHints.firstPost = True # Does not need to be reset
+                    if postWindow['next_post_id'] == '' and p['id'] == postWindow['order'][0]:
+                        postHints.lastPost = True
+                        processor(Post.fromMattermost(p), postHints)
+                        postHints.lastPost = False
+                    else:
+                        processor(Post.fromMattermost(p), postHints)
                     postsProcessed += 1
             else:
                 for postId in reversed(postWindow['order'][:len(postWindow['order'])-pageOffset]):
@@ -316,7 +334,14 @@ class MattermostDriver:
                         break
                     if afterTime and p['create_at'] <= afterTime.timestamp:
                         continue
-                    processor(Post.fromMattermost(p))
+                    if postWindow['next_post_id'] == '' and p['id'] == postWindow['order'][0]:
+                        postHints.lastPost = True # Does not need to be reset
+                    if postWindow['prev_post_id'] == '' and p['id'] == postWindow['order'][-1]:
+                        postHints.lastPost = True
+                        processor(Post.fromMattermost(p), postHints)
+                        postHints.lastPost = False
+                    else:
+                        processor(Post.fromMattermost(p), postHints)
                     postsProcessed += 1
 
             # No messages recieved?
@@ -349,7 +374,7 @@ class MattermostDriver:
 
     def getPosts(self, channel: Channel = None, *args, **kwargs) -> List[Post]:
         result = []
-        def process(p: Post):
+        def process(p: Post, hints: 'MattermostDriver.PostHints'):
             result.append(p)
         self.processPosts(channel=channel, processor=process, *args, **kwargs)
         return result

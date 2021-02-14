@@ -5,6 +5,13 @@
 ### feat
 
 - support incremental download - keep metadata so messages from channel firstMessage..lastSavedMessage won't need to be resend
+- separate settings for public and private channels
+- make avatar download setting per-channel
+- allow to specify config for other team / other users / etc. - if present downloads all, not just whitelist
+
+### fix
+
+- either old messages are being deleted in large public channels or end conditions of post processing are wrong
 
 ## 1.0
 
@@ -12,4 +19,3 @@
 
 - python package
   - copyright etc.
-- tool to convert internal representation to format viewed by discord html based history viewer

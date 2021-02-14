@@ -8,4 +8,4 @@ Fill config.json with appropriate login requirements (see config.schema.json for
 
 ## References
 API reference - https://api.mattermost.com
-Fully featured Python MM client - https://github.com/Vaelor/python-mattermost-driver
+Fully featured Python MM client library - https://github.com/Vaelor/python-mattermost-driver

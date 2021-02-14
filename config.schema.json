@@ -180,41 +180,6 @@
           },
           "publicChannelOptions": {
             "$ref": "#/definitions/channelPostOptions"
-          },
-          "groupChannelOptions": {
-            "$ref": "#/definitions/channelPostOptions"
-          },
-          "groups": {
-            "description": "List of groups we want to save conversations with (all if ommited).",
-            "type": "array",
-            "items": {
-              "description": "Group channel selector. Specify by id or list of users.",
-              "type": "object",
-              "required": ["group"],
-              "allOf": [
-                {
-                  "properties": {
-                    "group": {
-                      "description": "Identification of a group channel. Either channel id or list of users.",
-                      "oneOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "array",
-                          "items": {
-                            "$ref": "#/definitions/entityLocator"
-                          }
-                        }
-                      ]
-                    }
-                  }
-                },
-                {
-                  "$ref": "#/definitions/channelPostOptions"
-                }
-              ]
-            }
           }
         }
       }
@@ -227,6 +192,38 @@
           {
             "description": "Identification of the user.",
             "$ref": "#/definitions/entityLocator"
+          },
+          {
+            "$ref": "#/definitions/channelPostOptions"
+          }
+        ]
+      }
+    },
+    "groups": {
+      "description": "List of groups we want to save conversations with (all if ommited).",
+      "type": "array",
+      "items": {
+        "description": "Group channel selector. Specify by id or list of users.",
+        "type": "object",
+        "required": ["group"],
+        "allOf": [
+          {
+            "properties": {
+              "group": {
+                "description": "Identification of a group channel. Either channel id or list of users.",
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/definitions/entityLocator"
+                    }
+                  }
+                ]
+              }
+            }
           },
           {
             "$ref": "#/definitions/channelPostOptions"

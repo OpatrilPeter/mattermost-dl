@@ -1,36 +1,11 @@
 
-import dataclasses
-from enum import Enum
-from dataclasses import dataclass, field as dataclassfield
-import json
-import os
-from typing import Any, Generic, List, NamedTuple, Optional, TypeVar, Union, cast
-from pathlib import Path
-
-
-from bo import Id, Time
+from common import *
+from bo import EntityLocator, Id, Time
 import progress
 from progress import ProgressSettings
 
-class EntityLocator:
-    def __init__(self, info: dict):
-        ok = False
-        for key in info:
-            if key in ('id', 'name', 'internalName'):
-                if ok:
-                    raise ValueError
-                ok = True
-        else:
-            if not ok:
-                raise ValueError
-        if 'id' in info:
-            self.id: Id = info['id']
-        if 'name' in info:
-            self.name: str = info['name']
-        if 'internalName' in info:
-            self.internalName: str = info['internalName']
-    def __repr__(self) -> str:
-        return f'EntityLocator({self.__dict__})'
+import dataclasses
+import json
 
 # Options are All (true), None (false), or explicit list
 T = TypeVar('T')
@@ -116,8 +91,6 @@ class GroupChannelSpec:
 class TeamSpec:
     locator: EntityLocator
     channels: EntityList[ChannelSpec] = True
-    groups: EntityList[GroupChannelSpec] = True
-    groupChannelDefaults: ChannelOptions = ChannelOptions()
     publicChannelDefaults: ChannelOptions = ChannelOptions()
 
     def __init__(self, info: dict, group: ChannelOptions, public: ChannelOptions):
@@ -127,12 +100,6 @@ class TeamSpec:
             channelDefaults = ChannelOptions(info['defaultChannelOptions'])
         else:
             channelDefaults = None
-        if 'groupChannelOptions' in info:
-            self.groupChannelDefaults = ChannelOptions(info['groupChannelOptions'])
-        elif channelDefaults:
-            self.groupChannelDefaults = channelDefaults
-        else:
-            self.groupChannelDefaults = group
         if 'publicChannelOptions' in info:
             self.publicChannelDefaults = ChannelOptions(info['publicChannelOptions'])
         elif channelDefaults:
@@ -146,12 +113,6 @@ class TeamSpec:
             else:
                 self.channels = [ChannelSpec(chan, self.publicChannelDefaults) for chan in info['channels']]
 
-        if 'groups' in info:
-            if len(info['groups']) == 0:
-                self.groups = False
-            else:
-                self.groups = [GroupChannelSpec(chan, self.groupChannelDefaults) for chan in info['groups']]
-
 @dataclass
 class ConfigFile:
     hostname: str = ''
@@ -162,6 +123,7 @@ class ConfigFile:
     throttlingLoopDelay: int = 0
     teams: EntityList[TeamSpec] = True
     users: EntityList[ChannelSpec] = True
+    groups: EntityList[GroupChannelSpec] = True
     channelDefaults: ChannelOptions = ChannelOptions()
     directChannelDefaults: ChannelOptions = ChannelOptions()
     groupChannelDefaults: ChannelOptions = ChannelOptions()
@@ -245,6 +207,11 @@ def readConfig(filename: str) -> ConfigFile:
                     ChannelSpec(userChannel, res.directChannelDefaults)
                     for userChannel in config['users']
                 ]
+        if 'groups' in config:
+            if len(config['groups']) == 0:
+                res.groups = False
+            else:
+                res.groups = [GroupChannelSpec(chan, res.groupChannelDefaults) for chan in config['groups']]
 
         if 'downloadAllEmojis' in config and config['downloadAllEmojis']:
             res.downloadAllEmojis = True

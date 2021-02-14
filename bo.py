@@ -3,12 +3,46 @@
     OOP representations of Mattermost entities
 '''
 
+__all__ = [
+    'EntityLocator',
+    'Id',
+    'Time',
+    'JsonMessage',
+    'User',
+    'Emoji',
+    'FileAttachment',
+    'PostReaction',
+    'Post',
+    'ChannelType',
+    'Channel',
+    'TeamType',
+    'Team',
+]
+
+from common import *
+
 from datetime import datetime
-from dataclasses import dataclass, field as dataclassfield
-from enum import Enum
 from functools import total_ordering
-import logging
-from typing import Any, Dict, List, NewType, Optional, Sized, Union, cast
+
+class EntityLocator:
+    def __init__(self, info: dict):
+        ok = False
+        for key in info:
+            if key in ('id', 'name', 'internalName'):
+                if ok:
+                    raise ValueError
+                ok = True
+        else:
+            if not ok:
+                raise ValueError
+        if 'id' in info:
+            self.id: Id = info['id']
+        if 'name' in info:
+            self.name: str = info['name']
+        if 'internalName' in info:
+            self.internalName: str = info['internalName']
+    def __repr__(self) -> str:
+        return f'EntityLocator({self.__dict__})'
 
 @total_ordering
 class Time:
@@ -152,6 +186,16 @@ class User(JsonMessage):
 
         u.cleanMisc()
         return cls(**u.__dict__)
+
+    def match(self, locator: EntityLocator) -> bool:
+        if hasattr(locator, 'id'):
+            return self.id == locator.id
+        elif hasattr(locator, 'name'):
+            return self.name == locator.name
+        else:
+            assert hasattr(locator, 'internalName')
+            return self.name == locator.internalName
+
 
 @dataclass
 class Emoji(JsonMessage):
@@ -317,20 +361,20 @@ class Post(JsonMessage):
             p.rootPostId = x
         if p.extract_or('is_pinned', False):
             p.isPinned = True
-        props = p.extract('props')
-        props = {key: value
-            for key, value in props.items()
+
+        x = p.extract('props')
+        x = {key: value
+            for key, value in x.items()
                 # Drop fields that are known to be unnecessary
                 if (key not in ('disable_group_highlight', 'channel_mentions')
                     and value != "")
         }
+        if x:
+            p.misc['props'] = x
+
         x = p.extract('type')
         if x:
             p.specialMsgType = x
-            if props:
-                p.specialMsgProperties = x
-        elif props:
-            p.misc['props'] = props
 
         metadata = p.extract('metadata')
         if 'embeds' in metadata:
@@ -459,6 +503,15 @@ class Channel(JsonMessage):
             if (includeMembers or key != 'members')
         }
 
+    def match(self, locator: EntityLocator) -> bool:
+        if hasattr(locator, 'id'):
+            return self.id == locator.id
+        elif hasattr(locator, 'internalName'):
+            return self.internalName == locator.internalName
+        else:
+            assert hasattr(locator, 'name')
+            return self.name == locator.name
+
 
 class TeamType(Enum):
     Open = 'O'
@@ -538,3 +591,11 @@ class Team(JsonMessage):
     def __str__(self):
         return f'Team({self.internalName})'
 
+    def match(self, locator: EntityLocator) -> bool:
+        if hasattr(locator, 'id'):
+            return self.id == locator.id
+        elif hasattr(locator, 'internalName'):
+            return self.internalName == locator.internalName
+        else:
+            assert hasattr(locator, 'name')
+            return self.name == locator.name

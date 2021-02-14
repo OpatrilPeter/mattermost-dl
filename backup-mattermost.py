@@ -3,12 +3,11 @@
 from sys import version_info
 assert version_info >= (3, 7), "Required at least python 3.7, executed with version "+str(version_info)+"!"
 
-from argparse import ArgumentParser
-import logging
-from pathlib import Path
-
+from common import *
 from config import readConfig
 from saver import Saver
+
+from argparse import ArgumentParser
 
 argumentParser = ArgumentParser(description="Creates a local history dump of Mattermost.")
 argumentParser.add_argument('--conf','-c', help='Configuration JSON file. For allowed options see config.schema.json in source code.', type=Path, default=Path('./config.json'))

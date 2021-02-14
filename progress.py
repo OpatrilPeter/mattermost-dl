@@ -3,11 +3,9 @@
     working in interactive and noninteractive environment.
 '''
 
+from common import *
+
 from copy import copy
-from dataclasses import dataclass
-from enum import Enum
-from time import clock
-from typing import TextIO
 
 class VisualizationMode(Enum):
     DumbTerminal = 0
