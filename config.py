@@ -93,28 +93,41 @@ class GroupChannelSpec:
 @dataclass(init=False)
 class TeamSpec:
     locator: EntityLocator
-    channels: EntityList[ChannelSpec] = True
+    privateChannels: EntityList[ChannelSpec] = True
+    publicChannels: EntityList[ChannelSpec] = True
+    privateChannelDefaults: ChannelOptions = ChannelOptions()
     publicChannelDefaults: ChannelOptions = ChannelOptions()
 
-    def __init__(self, info: dict, group: ChannelOptions, public: ChannelOptions):
+    def __init__(self, info: dict, globalPrivateDefaults: ChannelOptions, globalPublicDefaults: ChannelOptions):
         self.locator = EntityLocator(info['team'])
 
         if 'defaultChannelOptions' in info:
             channelDefaults = ChannelOptions(info['defaultChannelOptions'])
         else:
             channelDefaults = None
+        if 'privateChannelOptions' in info:
+            self.privateChannelOptions = ChannelOptions(info['privateChannelOptions'])
+        elif channelDefaults:
+            self.privateChannelOptions = channelDefaults
+        else:
+            self.privateChannelOptions = globalPrivateDefaults
         if 'publicChannelOptions' in info:
             self.publicChannelDefaults = ChannelOptions(info['publicChannelOptions'])
         elif channelDefaults:
             self.publicChannelDefaults = channelDefaults
         else:
-            self.publicChannelDefaults = public
+            self.publicChannelDefaults = globalPublicDefaults
 
-        if 'channels' in info:
-            if len(info['channels']) == 0:
-                self.channels = False
+        if 'privateChannels' in info:
+            if len(info['privateChannels']) == 0:
+                self.privateChannels = False
             else:
-                self.channels = [ChannelSpec(chan, self.publicChannelDefaults) for chan in info['channels']]
+                self.privateChannels = [ChannelSpec(chan, self.privateChannelDefaults) for chan in info['privateChannels']]
+        if 'publicChannels' in info:
+            if len(info['publicChannels']) == 0:
+                self.publicChannels = False
+            else:
+                self.publicChannels = [ChannelSpec(chan, self.privateChannelDefaults) for chan in info['publicChannels']]
 
 @dataclass
 class ConfigFile:
@@ -130,6 +143,7 @@ class ConfigFile:
     channelDefaults: ChannelOptions = ChannelOptions()
     directChannelDefaults: ChannelOptions = ChannelOptions()
     groupChannelDefaults: ChannelOptions = ChannelOptions()
+    privateChannelDefaults: ChannelOptions = ChannelOptions()
     publicChannelDefaults: ChannelOptions = ChannelOptions()
 
     outputDirectory: Path = Path()
@@ -186,6 +200,10 @@ def readConfig(filename: str) -> ConfigFile:
             res.groupChannelDefaults = ChannelOptions().update(config['groupChannelOptions'])
         else:
             res.groupChannelDefaults = res.channelDefaults
+        if 'privateChannelOptions' in config:
+            res.privateChannelDefaults = ChannelOptions().update(config['privateChannelOptions'])
+        else:
+            res.privateChannelDefaults = res.channelDefaults
         if 'publicChannelOptions' in config:
             res.publicChannelDefaults = ChannelOptions().update(config['publicChannelOptions'])
         else:

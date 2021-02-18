@@ -169,8 +169,23 @@
           "team": {
             "$ref": "#/definitions/entityLocator"
           },
-          "channels": {
+          "publicChannels": {
             "description": "Public (open) channels to save (all if ommited).",
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "description": "Channel unique identificators",
+                  "$ref": "#/definitions/entityLocator"
+                },
+                {
+                  "$ref": "#/definitions/channelPostOptions"
+                }
+              ]
+            }
+          },
+          "privateChannels": {
+            "description": "Private channels to save (all if ommited).",
             "type": "array",
             "items": {
               "allOf": [
@@ -188,6 +203,9 @@
             "$ref": "#/definitions/channelPostOptions"
           },
           "publicChannelOptions": {
+            "$ref": "#/definitions/channelPostOptions"
+          },
+          "privateChannelOptions": {
             "$ref": "#/definitions/channelPostOptions"
           }
         }
@@ -247,6 +265,9 @@
       "$ref": "#/definitions/channelPostOptions"
     },
     "groupChannelOptions": {
+      "$ref": "#/definitions/channelPostOptions"
+    },
+    "privateChannelOptions": {
       "$ref": "#/definitions/channelPostOptions"
     },
     "publicChannelOptions": {

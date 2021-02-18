@@ -117,45 +117,56 @@ class Saver:
         res: Dict[Team, List[ChannelRequest]] = {}
         teams = self.driver.getTeams()
 
-        def getPublicChannelsForTeam(team: Team, wantedChannels: List[ChannelSpec]) -> List[ChannelRequest]:
-            publicChannels = []
+        def getChannelsForTeam(team: Team, wantedChannels: Iterable[ChannelSpec]) -> List[ChannelRequest]:
+            channels = []
             for wch in wantedChannels:
                 for ch in team.channels.values():
                     if ch.type in (ChannelType.Open, ChannelType.Private) and ch.match(wch.locator):
-                        publicChannels.append(ChannelRequest(config=wch.opts, metadata=ch))
+                        channels.append(ChannelRequest(config=wch.opts, metadata=ch))
                         break
                 else:
-                    logging.warning(f'Found no requested public channel on team {team.internalName} ({team.name}) via locator {wch.locator}.')
-            return publicChannels
+                    logging.warning(f'Found no requested channel on team {team.internalName} ({team.name}) via locator {wch.locator}.')
+            return channels
 
         if self.configfile.teams is True:
             for t in teams.values():
-                publicChannels, groupChannels = [], []
+                channels = []
                 for ch in t.channels.values():
                     if ch.type == ChannelType.Open:
-                        publicChannels.append(ChannelRequest(config=self.configfile.publicChannelDefaults, metadata=ch))
-                    elif ch.type == ChannelType.Group:
-                        groupChannels.append(ChannelRequest(config=self.configfile.groupChannelDefaults, metadata=ch))
-                res[t] = publicChannels
+                        channels.append(ChannelRequest(config=self.configfile.publicChannelDefaults, metadata=ch))
+                    elif ch.type == ChannelType.Private:
+                        channels.append(ChannelRequest(config=self.configfile.privateChannelDefaults, metadata=ch))
+                res[t] = channels
             return res
 
         assert isinstance(self.configfile.teams, list)
         for wantedTeam in self.configfile.teams:
             for availableTeam in teams.values():
                 if availableTeam.match(wantedTeam.locator):
-                    publicChannels, groupChannels = [], []
+                    publicChannels, privateChannels = [], []
 
-                    if wantedTeam.channels is True:
-                        publicChannels = [ChannelRequest(config=wantedTeam.publicChannelDefaults, metadata=ch) for ch in availableTeam.channels.values()
-                            if ch.type == ChannelType.Open
+                    if wantedTeam.publicChannels is True:
+                        publicChannels = [ChannelRequest(config=wantedTeam.publicChannelDefaults, metadata=ch)
+                            for ch in availableTeam.channels.values()
+                                if ch.type == ChannelType.Open
                         ]
-                    elif wantedTeam.channels is False:
+                    elif wantedTeam.publicChannels is False:
                         pass
                     else:
-                        assert isinstance(wantedTeam.channels, list)
-                        publicChannels = getPublicChannelsForTeam(availableTeam, wantedTeam.channels)
+                        assert isinstance(wantedTeam.publicChannels, list)
+                        publicChannels = getChannelsForTeam(availableTeam, wantedTeam.publicChannels)
+                    if wantedTeam.privateChannels is True:
+                        privateChannels = [ChannelRequest(config=wantedTeam.privateChannelDefaults, metadata=ch)
+                            for ch in availableTeam.channels.values()
+                                if ch.type == ChannelType.Private
+                        ]
+                    elif wantedTeam.privateChannels is False:
+                        pass
+                    else:
+                        assert isinstance(wantedTeam.privateChannels, list)
+                        privateChannels = getChannelsForTeam(availableTeam, wantedTeam.privateChannels)
 
-                    res[availableTeam] = publicChannels
+                    res[availableTeam] = publicChannels + privateChannels
                     break
             else:
                 logging.error(f'Team requested by {wantedTeam.locator} was not found!')

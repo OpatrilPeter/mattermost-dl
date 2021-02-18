@@ -5,7 +5,6 @@
 ### feat
 
 - support incremental download - keep metadata so messages from channel firstMessage..lastSavedMessage won't need to be resend
-- separate settings for public and private channels
 - allow to specify config for other team / other users / etc. - if present downloads all, not just whitelist
 
 ### fix

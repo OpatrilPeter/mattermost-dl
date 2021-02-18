@@ -11,6 +11,6 @@ import re
 import sys
 from typing import (
     Any, BinaryIO, Callable, cast,
-    Collection, Dict, List, NewType, NoReturn,
+    Collection, Dict, Iterable, List, NewType, NoReturn,
     Optional, Set, Sized, TextIO, Tuple, TypeVar, Union
 )
