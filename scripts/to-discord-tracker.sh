@@ -50,7 +50,7 @@ MAKE_SERVERS=$(minify <<'EOF'
         else
             {(.channel.id): {
                 server: 0,
-                name: .name
+                name: .channel.name
             }}
         end
     )
