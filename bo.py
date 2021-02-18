@@ -410,6 +410,7 @@ class Post(JsonMessage):
         p.drop('file_ids')
         # Contains automatically extracted hashtags from the message (usually wrong)
         p.drop('hashtags')
+        p.drop('last_reply_at')
 
         p.cleanMisc()
 

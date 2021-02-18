@@ -86,11 +86,13 @@ class Saver:
                         if self.configfile.users is True:
                             otherUser = self.driver.getUserById(self.driver.getUserIdFromDirectChannelName(channel.internalName))
                             wantedDirectChannels.update({otherUser: ChannelRequest(config=self.configfile.directChannelDefaults, metadata=channel)})
+                        elif self.configfile.users is False:
+                            pass
                         else:
                             u, opts = directChannelNames[channel.internalName]
                             wantedDirectChannels.update({u: ChannelRequest(config=opts, metadata=channel)})
                             del directChannelNames[channel.internalName]
-                elif channel.type == ChannelType.Group:
+                elif channel.type == ChannelType.Group and self.configfile.groups is not False:
                     if self.configfile.groups is True:
                         wantedGroupChannels.add(ChannelRequest(config=self.configfile.groupChannelDefaults, metadata=channel))
                     else:

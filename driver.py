@@ -257,7 +257,10 @@ class MattermostDriver:
                     - if afterPost filter exist
                         - apply offset
                     - else
-                        - set page according to total message count so that the final page would be shown, then subtract offset
+                        - set page according to total message count so that the final page would be shown
+                        - if the fetched page isn't, in fact, final (due to total message count being approximate),
+                            continue into history
+                        - subtract offset
                     - start reading pages, after first page set afterPost to latest post and read page 0
                     - skip until afterTime filter matches, then start processing
                     - continue collecting until end, maxCount or beforeTime is reached
@@ -287,7 +290,19 @@ class MattermostDriver:
             page = offset // bufferSize
             pageOffset = offset % bufferSize
         else:
-            absoluteMessageOffset = channel.messageCount - offset
+            absoluteMessageOffset = channel.messageCount
+            page = channel.messageCount // bufferSize - int(channel.messageCount % bufferSize == 0)
+            while True:
+                postWindow = self.get(f'channels/{channelId}/posts', {'per_page': bufferSize, 'page': page})
+                assert isinstance(postWindow, dict)
+
+                # We're touching last page, yet there's more posts -> not truly last page
+                if postWindow['prev_post_id'] != '':
+                    page += 1
+                    continue
+                break
+
+            absoluteMessageOffset = page * bufferSize + len(postWindow['order']) - offset
             page = absoluteMessageOffset // bufferSize - int(absoluteMessageOffset % bufferSize == 0)
             if offset > channel.messageCount % bufferSize:
                 pageOffset = bufferSize - absoluteMessageOffset % bufferSize
