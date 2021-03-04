@@ -1,0 +1,161 @@
+{
+    "$schema": "http://json-schema.org/schema",
+    "description": "Describes the storage format of individual posts.",
+    "required": [
+        "id",
+        "userId",
+        "createTime",
+        "message"
+    ],
+    "properties": {
+        "id": {
+            "description": "Unique message identificatior.",
+            "type": "string"
+        },
+        "userId": {
+            "description": "Unique user identificator.",
+            "type": "string"
+        },
+        "createTime": {
+            "description": "Creation time in miliseconds since 1970-01-01.",
+            "type": "integer"
+        },
+        "message": {
+            "description": "Content of the post.",
+            "type": "string"
+        },
+        "isPinned": {
+            "description": "Is this post pinned to the channel?",
+            "type": "boolean"
+        },
+        "updateTime": {
+            "description": "Time at which post was last updated, in miliseconds since 1970-01-01.",
+            "type": "integer"
+        },
+        "publicUpdateTime": {
+            "description": "Alternative to updateTime, correspoding to `edit_at` from Mattermost v4 API. (as opposed to `update_at`)",
+            "type": "integer"
+        },
+        "deleteTime": {
+            "description": "Time at which post was deleted, in miliseconds since 1970-01-01. Note that ordinary users do not fetch deleted posts at all.",
+            "type": "integer"
+        },
+        "parentPostId": {
+            "description": "Id of post this post replies to.",
+            "type": "string"
+        },
+        "rootPostId": {
+            "description": "Root of the thread (chain of posts) this post replies to.",
+            "type": "string"
+        },
+        "specialMsgType": {
+            "description": "Protocol-specific label for meta-messages like \"user X joined the channel\". Ommited for conventional user messages.",
+            "type": "string"
+        },
+        "emojis": {
+            "description": "List of (nontrivial) emojis appearing in the message.",
+            "type": "array",
+            "items": {
+                "description": "Emoji identificator. Full metadata are available in channel header.",
+                "type": "string"
+            }
+        },
+        "attachments": {
+            "description": "List of file attached to the post.",
+            "type": "array",
+            "items": {
+                "description": "Describes single file attachment.",
+                "type": "object",
+                "required": [
+                    "id",
+                    "name"
+                ],
+                "properties": {
+                    "id": {
+                        "description": "File attachment's unique idenfiticator.",
+                        "type": "string"
+                    },
+                    "name": {
+                        "description": "File name of the attachment.",
+                        "type": "string"
+                    },
+                    "byteSize": {
+                        "description": "File size in bytes.",
+                        "type": "integer"
+                    },
+                    "mimeTime": {
+                        "description": "MIME type of the attachment.",
+                        "type": "string"
+                    },
+                    "createTime": {
+                        "description": "Time when the attachment was uploaded to the system in miliseconds since 1970-01-01. Usually coinciding with post creation.",
+                        "type": "integer"
+                    },
+                    "updateTime": {
+                        "description": "Time when the attachment was last modified in miliseconds since 1970-01-01.",
+                        "type": "integer"
+                    },
+                    "deleteTime": {
+                        "description": "Time when the attachment was marked as deleted, in miliseconds since 1970-01-01. Note that ordinary users do not fetch deleted attachments at all.",
+                        "type": "integer"
+                    },
+                    "misc": {
+                        "description": "Miscallaneous unrecognized properties of the object. Generally, any additional fetched property that is not known to be (un)useable ends up here.",
+                        "type": "object"
+                    }
+                }
+            }
+        },
+        "reactions": {
+            "description": "List of simple emoji reactions to the post.",
+            "type": "array",
+            "items": {
+                "description": "Describes emoji reaction from single user.",
+                "type": "object",
+                "oneOf": [
+                    {
+                        "required": [
+                            "userId",
+                            "createTime",
+                            "emojiId"
+                        ]
+                    },
+                    {
+                        "required": [
+                            "userId",
+                            "createTime",
+                            "emojiName"
+                        ]
+                    }
+                ],
+                "properties": {
+                    "userId": {
+                        "description": "User identificator of the user posting the reaction.",
+                        "type": "string"
+                    },
+                    "createTime": {
+                        "description": "Time of the reaction in miliseconds since 1970-01-01.",
+                        "type": "integer"
+                    },
+                    "emojiId": {
+                        "description": "Identifier of the emoji used in reaction.",
+                        "type": "string"
+                    },
+                    "emojiName": {
+                        "description": "Name of the emoji used in reaction.",
+                        "$comment": "As Mattermost API currently does not return emoji id, it's implicitly assumed emoji name is unique.",
+                        "type": "string"
+                    },
+                    "misc": {
+                        "description": "Miscallaneous unrecognized properties of the object. Generally, any additional fetched property that is not known to be (un)useable ends up here.",
+                        "type": "object"
+                    }
+                }
+            }
+        },
+        "misc": {
+            "description": "Miscallaneous unrecognized properties of the object. Generally, any additional fetched property that is not known to be (un)useable ends up here.",
+            "type": "object"
+        }
+    }
+}

@@ -85,7 +85,7 @@
           "type": "boolean"
         },
         "maximumPostCount": {
-          "description": "Download only up to given number of posts. Unlimited if -1 or default.",
+          "description": "Download only up to given number of posts in one session. Unlimited if -1 or default.",
           "type": "integer",
           "minimum": -1
         },
