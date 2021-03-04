@@ -314,10 +314,6 @@
     "downloadAllEmojis": {
       "description": "Whether to download all custom emojis avaiable, regardless of origin.",
       "type": "boolean"
-    },
-    "downloadAvatars": {
-      "description": "Should download avatars (user icons)?",
-      "type": "boolean"
     }
   }
 }

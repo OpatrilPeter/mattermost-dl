@@ -151,43 +151,45 @@ class JsonMessage:
     _T = TypeVar('_T', bound='JsonMessage', covariant=True)
     @classmethod
     def fromStore(cls: Type[_T], info: dict) -> _T:
-        misc = {}
+        misc = info['misc'] if 'misc' in info else {}
         knownInfo = {}
         fields = {f.name: f for f in dataclasses.fields(cls)}
         for key, value in info.items():
-            if key in fields and key is not 'misc':
-                FieldType = fields[key].type
-                if hasattr(cls, 'memberFromStore'):
-                    possibleMemberValue = cls.memberFromStore(key, value)
-                    if possibleMemberValue is not NotImplemented:
-                        knownInfo[key] = possibleMemberValue
-                        continue
-                elif hasattr(FieldType, 'fromStore'):
-                    knownInfo[key] = FieldType.fromStore(value)
-                # Not typing-based pseudotype or primitive type
-                elif isinstance(FieldType, type):
-                    if issubclass(FieldType, Enum):
-                        knownInfo[key] = FieldType[value]
-                    elif FieldType not in (str, int, float, bool):
-                        knownInfo[key] = FieldType(value)
-                    else:
-                        knownInfo[key] = value
-                else:
-                    logging.error(f"Can't load type `{cls.__name__}` from JSON form automatically, field `{key}` of type `{FieldType.__name__ if hasattr(FieldType, '__name__') else FieldType}` can't be converted.")
-                    raise TypeError
-            else:
+            if key == 'misc':
+                continue
+            if key not in fields:
                 misc[key] = value
+                continue
+            FieldType = fields[key].type
+            if hasattr(cls, 'memberFromStore'):
+                possibleMemberValue = cls.memberFromStore(key, value)
+                if possibleMemberValue is not NotImplemented:
+                    knownInfo[key] = possibleMemberValue
+                    continue
+            if hasattr(FieldType, 'fromStore'):
+                knownInfo[key] = FieldType.fromStore(value)
+            # Not typing-based pseudotype or primitive type
+            elif isinstance(FieldType, type):
+                if issubclass(FieldType, Enum):
+                    knownInfo[key] = FieldType[value]
+                elif FieldType not in (str, int, float, bool):
+                    knownInfo[key] = FieldType(value)
+                else:
+                    knownInfo[key] = value
+            else:
+                logging.error(f"Can't load type `{cls.__name__}` from JSON form automatically, field `{key}` of type `{FieldType.__name__ if hasattr(FieldType, '__name__') else FieldType}` can't be converted.")
+                raise TypeError
         return cls(misc=misc, **knownInfo)
 
 @dataclass
 class User(JsonMessage):
     id: Id
     name: str
-    firstName: str
-    lastName: str
     createTime: Time
     updateTime: Optional[Time] = None
     deleteTime: Optional[Time] = None
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
     nickname: Optional[str] = None
     updateAvatarTime: Optional[Time] = None
     position: Optional[str] = None
@@ -205,8 +207,12 @@ class User(JsonMessage):
         x = u.extract('nickname')
         if x:
             u.nickname = x
-        u.firstName = u.extract('first_name')
-        u.lastName = u.extract('last_name')
+        x = u.extract('first_name')
+        if x:
+            u.firstName = x
+        x = u.extract('last_name')
+        if x:
+            u.lastName = x
 
         u.createTime = Time(u.extract('create_at'))
         x = u.extract('update_at')
@@ -244,7 +250,7 @@ class User(JsonMessage):
     def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
         if memberName in ('updateTime', 'deleteTime', 'updateAvatarTime'):
             return Time(jsonMemberValue)
-        elif memberName in ('id', 'nickname', 'position', 'roles', 'avatarFilename'):
+        elif memberName in ('id', 'firstName', 'lastName', 'nickname', 'position', 'roles', 'avatarFilename'):
             return jsonMemberValue
         return NotImplemented
 

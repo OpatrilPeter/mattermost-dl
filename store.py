@@ -61,11 +61,12 @@ class PostStorage(JsonMessage):
 
     def extend(self, other: 'PostStorage'):
         assert other.organization == self.organization
-        assert other.postBeforeFirst == self.lastPostId
-        self.count += other.count
-        self.lastPostId = other.lastPostId
-        self.lastPostTime = other.lastPostTime
-        self.postAfterLast = other.postAfterLast
+        if other.count > 0:
+            assert self.lastPostId == other.postBeforeFirst
+            self.count += other.count
+            self.lastPostId = other.lastPostId
+            self.lastPostTime = other.lastPostTime
+            self.postAfterLast = other.postAfterLast
 
     @classmethod
     def memberFromStore(cls, memberName: str, jsonMemberValue: Any) -> Any:
