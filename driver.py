@@ -236,12 +236,18 @@ class MattermostDriver:
 
     @dataclass
     class PostHints:
-        # This post has no predecessor
-        firstPost: bool = False
-        # This post has no successor
-        lastPost: bool = False
+        processedCount: int = 0
+        # Id of post precceeding current one. None if the post is first in channel
+        postIdBefore: Optional[Id] = None
+        # Id of post succeeding current one. None if the post is last in channel
+        postIdAfter: Optional[Id] = None
 
-    def processPosts(self, processor: Callable[[Post, 'MattermostDriver.PostHints'], None], channel: Channel = None, *, beforePost: Id = None, afterPost: Id = None, beforeTime: Optional[Time] = None, afterTime: Optional[Time] = None, bufferSize: int = 60, maxCount: int = 0, offset: int = 0, timeDirection: OrderDirection = OrderDirection.Asc):
+    # REFACTORME: this function could be simplified, possibly separate downloading from filtering by additional callbacks
+    def processPosts(self, processor: Callable[[Post, 'MattermostDriver.PostHints'], None], channel: Channel = None, *,
+            beforePost: Id = None, afterPost: Id = None,
+            beforeTime: Optional[Time] = None, afterTime: Optional[Time] = None,
+            bufferSize: int = 60, maxCount: int = 0, offset: int = 0,
+            timeDirection: OrderDirection = OrderDirection.Asc):
         '''
             Main function to load all channel's posts.
             Loading happens lazily in batches, each post is passed to external callable.
@@ -310,7 +316,6 @@ class MattermostDriver:
                 pageOffset = offset
             assert pageOffset < bufferSize # Sanity check
 
-        postsProcessed: int = 0
         postHints = self.PostHints()
         while True:
             if page != 0:
@@ -321,43 +326,35 @@ class MattermostDriver:
             finished: bool = False
 
             if timeDirection == OrderDirection.Desc:
-                for postId in postWindow['order'][pageOffset:]:
+                for windowIndex, postId in enumerate(postWindow['order'][pageOffset:]):
                     p = postWindow['posts'][postId]
+                    postHints.postIdAfter = postWindow['order'][windowIndex + 1] if windowIndex + 1 < len(postWindow['order']) else postWindow['prev_post_id'] if postWindow['prev_post_id'] != '' else None
+                    postHints.postIdBefore = postWindow['order'][windowIndex - 1] if windowIndex - 1 >= 0 else postWindow['next_post_id'] if postWindow['next_post_id'] != '' else None
                     if ((afterPost and p['id'] == afterPost)
                         or (afterTime and p['create_at'] < afterTime.timestamp)
-                        or (maxCount and postsProcessed == maxCount)):
+                        or (maxCount and postHints.processedCount == maxCount)):
                         finished = True
                         break
                     if beforeTime and p['create_at'] >= beforeTime.timestamp:
                         continue
-                    if postWindow['prev_post_id'] == '' and p['id'] == postWindow['order'][-1]:
-                        postHints.firstPost = True # Does not need to be reset
-                    if postWindow['next_post_id'] == '' and p['id'] == postWindow['order'][0]:
-                        postHints.lastPost = True
-                        processor(Post.fromMattermost(p), postHints)
-                        postHints.lastPost = False
-                    else:
-                        processor(Post.fromMattermost(p), postHints)
-                    postsProcessed += 1
-            else:
-                for postId in reversed(postWindow['order'][:len(postWindow['order'])-pageOffset]):
+                    processor(Post.fromMattermost(p), postHints)
+                    postHints.processedCount += 1
+            else: # timeDirection == OrderDirection.Asc
+                windowIndex = len(postWindow['order'])-pageOffset - 1
+                for postId in reversed(postWindow['order'][:windowIndex + 1]):
                     p = postWindow['posts'][postId]
+                    postHints.postIdBefore = postWindow['order'][windowIndex + 1] if windowIndex + 1 < len(postWindow['order']) else postWindow['prev_post_id'] if postWindow['prev_post_id'] != '' else None
+                    postHints.postIdAfter = postWindow['order'][windowIndex - 1] if windowIndex - 1 >= 0 else postWindow['next_post_id'] if postWindow['next_post_id'] != '' else None
                     if ((beforePost and p['id'] == beforePost)
                         or (beforeTime and p['create_at'] > beforeTime.timestamp)
-                        or (maxCount and postsProcessed == maxCount)):
+                        or (maxCount and postHints.processedCount == maxCount)):
                         finished = True
                         break
                     if afterTime and p['create_at'] <= afterTime.timestamp:
                         continue
-                    if postWindow['next_post_id'] == '' and p['id'] == postWindow['order'][0]:
-                        postHints.lastPost = True # Does not need to be reset
-                    if postWindow['prev_post_id'] == '' and p['id'] == postWindow['order'][-1]:
-                        postHints.lastPost = True
-                        processor(Post.fromMattermost(p), postHints)
-                        postHints.lastPost = False
-                    else:
-                        processor(Post.fromMattermost(p), postHints)
-                    postsProcessed += 1
+                    processor(Post.fromMattermost(p), postHints)
+                    postHints.processedCount += 1
+                    windowIndex -= 1
 
             # No messages recieved?
             if len(postWindow['order']) == 0:
@@ -369,7 +366,7 @@ class MattermostDriver:
                 else:
                     return
 
-            if finished or len(postWindow['order']) == 0 or (maxCount and postsProcessed >= maxCount):
+            if finished or len(postWindow['order']) == 0 or (maxCount and postHints.processedCount >= maxCount):
                 break
             if timeDirection == OrderDirection.Desc:
                 if postWindow['prev_post_id'] == '':

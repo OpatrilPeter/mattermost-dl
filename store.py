@@ -6,77 +6,128 @@
         - contains json equivalent of ChannelHeader
     channelname.data.json
         - contains newline separated sequence of compact json serializations of Post
+        - posts are ordered by timestamp and should be continous
 '''
 
 from bo import *
 from common import *
-from driver import MattermostDriver
+
+class PostOrdering(Enum):
+    '''
+        Describes how posts are organized in the storage
+    '''
+
+    Unsorted = 0 # May even have duplicates
+    Ascending = 1 # Sorted from oldest to newest
+    Descending = 2 # Sorted from newest to oldest
+    AscendingContinuous = 3 # Sorted from oldest to newest, no posts missing in interval
+    DescendingContinuous = 4 # Sorted from newest to oldest, no posts missing in interval
+
+    @classmethod
+    def fromStore(cls, info: str) -> 'PostOrdering':
+        for member in cls:
+            if info == member.name:
+                return member
+        else:
+            logging.warning(f"Unknown channel ordering type '{info}', assumed unsorted.")
+            return PostOrdering.Unsorted
+
+    def toStore(self) -> str:
+        return self.name
+
+@dataclass
+class PostStorage(JsonMessage):
+    '''
+        Note that if count == 0, other fields do not hold meaningful values.
+    '''
+
+    # Number of posts
+    count: int = 0
+    organization: PostOrdering = PostOrdering.Unsorted
+    # If the first post is not completely first, here is post that we known to be before it (respecting ordering)
+    postBeforeFirst: Optional[Id] = None
+    # Create time of first post in the storage
+    firstPostTime: Time = Time(0)
+    firstPostId: Id = Id('')
+    # Create time of last post in the storage
+    lastPostTime: Time = Time(0)
+    lastPostId: Id = Id('')
+    # If the post is not latest, this one shall be after it (respecting ordering)
+    postAfterLast: Optional[Id] = None
+
+    @staticmethod
+    def empty() -> 'PostStorage':
+        return PostStorage(misc={})
+
+    def extend(self, other: 'PostStorage'):
+        assert other.organization == self.organization
+        assert other.postBeforeFirst == self.lastPostId
+        self.count += other.count
+        self.lastPostId = other.lastPostId
+        self.lastPostTime = other.lastPostTime
+        self.postAfterLast = other.postAfterLast
+
+    @classmethod
+    def memberFromStore(cls, memberName: str, jsonMemberValue: Any) -> Any:
+        if memberName in ('firstPostId', 'lastPostId', 'postBeforeFirst', 'postAfterLast'):
+            return jsonMemberValue
+        return NotImplemented
 
 @dataclass
 class ChannelHeader:
-    firstPostTime: Optional[Time]
-    firstPostId: Optional[Id]
-    # If set, posts from the start of the channel up to this time are archived
-    lastPostTime: Optional[Time]
-    # If set, posts from the start of the channel up to this post id are archived
-    lastPostId: Optional[Id]
-    # Users that appeared in conversations
-    usedUsers: Set[User]
-    # Emojis that appeared in conversations
-    usedEmojis: Set[Emoji]
-    team: Optional[Team]
     channel: Channel
+    team: Optional[Team] = None # Missing if channel is not scoped under team
+    storage: Optional[PostStorage] = None # Missing if channel has no messages, so `storage.count > 0` shall hold
+    # Users that appeared in conversations
+    usedUsers: Set[User] = dataclassfield(default_factory=set)
+    # Emojis that appeared in conversations
+    usedEmojis: Set[Emoji] = dataclassfield(default_factory=set)
 
-    def __init__(self, channel: Channel, team: Team = None):
-        self.channel: Channel = channel
-        self.team = team
-        self.firstPostTime = None
-        self.firstPostId = None
-        self.lastPostTime = None
-        self.lastPostId = None
-        self.usedUsers = set()
-        self.usedEmojis = set()
-
-    def load(self, info: dict, driver: MattermostDriver):
+    @classmethod
+    def fromStore(cls, info: dict):
         '''
             Loading previously saved header.
         '''
-        if 'storage' in info:
-            storageInfo = info['storage']
-            self.firstPostTime: Optional[Time] = Time(storageInfo['firstPostTime'])
-            self.firstPostId: Optional[Id] = storageInfo['fistPostId']
-            self.lastPostTime: Optional[Time] = Time(storageInfo['lastPostTime'])
-            self.lastPostId: Optional[Id] = Id(storageInfo['lastPostId'])
-        else:
-            self.firstPostTime = None
-            self.firstPostId = None
-            self.lastPostTime = None
-            self.lastPostId = None
+        # Any default constructible class having __dict__ will do for mock
+        class _Header:
+            pass
+        self = cast(ChannelHeader, _Header())
+        self.channel = Channel.fromStore(info['channel'])
         if 'users' in info:
-            # TODO: load users from json
+            self.usedUsers = set()
             for userInfo in info['users']:
-                u = None
-                if 'id' in userInfo:
-                    u = driver.getUserById(userInfo['id'])
-                elif 'name' in userInfo:
-                    u = driver.getUserByName(userInfo['name'])
-                if u is not None:
-                    self.usedUsers.add(u)
-            # TODO: load emojis
+                self.usedUsers.add(User.fromStore(userInfo))
+        if 'team' in info:
+            self.team = Team.fromStore(info['team'])
+        if 'storage' in info:
+            self.storage = PostStorage.fromStore(info['storage'])
+        if 'emojis' in info:
+            self.usedEmojis = set()
+            for emojiInfo in info['emojis']:
+                self.usedEmojis.add(Emoji.fromStore(emojiInfo))
+        return cls(**self.__dict__)
 
-    def save(self) -> dict:
+    def update(self, other: 'ChannelHeader'):
+        self.channel = other.channel
+        if other.team is not None:
+            self.team = other.team
+        if other.storage is not None:
+            if self.storage is not None:
+                self.storage.extend(other.storage)
+            else:
+                self.storage = copy(other.storage)
+        self.usedUsers = other.usedUsers | self.usedUsers
+        self.usedEmojis = other.usedEmojis | self.usedEmojis
+
+    def toStore(self) -> dict:
         content = {}
         if self.team:
-            content.update(team=self.team.toJson(includeChannels=False))
-        content.update(channel=self.channel.toJson())
-        if self.firstPostId is not None:
-            content.update(storage={
-                'firstPostTime': self.firstPostTime,
-                'firstPostId': self.firstPostId,
-                'lastPostTime': self.lastPostTime,
-                'lastPostId': self.lastPostId,
-            })
-        content.update(users=[u.toJson() for u in self.usedUsers])
-        content.update(emojis=[e.toJson() for e in self.usedEmojis])
+            content.update(team=self.team.toStore(includeChannels=False))
+        content.update(channel=self.channel.toStore())
+        content.update(storage=self.storage.toStore())
+        if self.usedUsers:
+            content.update(users=[u.toStore() for u in self.usedUsers])
+        if self.usedEmojis:
+            content.update(emojis=[e.toStore() for e in self.usedEmojis])
 
         return content

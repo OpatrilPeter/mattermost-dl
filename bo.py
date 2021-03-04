@@ -21,6 +21,7 @@ __all__ = [
 
 from common import *
 
+import dataclasses
 from datetime import datetime
 from functools import total_ordering
 
@@ -73,14 +74,21 @@ class Time:
     def __repr__(self):
         return f"'{datetime.fromtimestamp(self._time/1000).isoformat()}'"
 
-    def toJson(self) -> Union[int, float]:
+    def toStore(self) -> Union[int, float]:
         return self.timestamp
 
 Id = NewType('Id', str)
 
 @dataclass
 class JsonMessage:
-    # All otherwise unknown fields
+    '''
+        Base class for all Json based data structures, notably all Mattermost entities.
+        Contains common code for loading from Mattermost representation while keeping
+        unknown fields available and facilities for saving and loading to internal store.
+    '''
+
+    # All otherwise unknown fields are collected in this generic dict
+    # Note: Without default value, as that would force all dataclass based subclasses to have all members optional
     misc: Dict[str, Any]
 
     def drop(self, attrName: str):
@@ -102,11 +110,13 @@ class JsonMessage:
         else:
             return fallback
 
-    # def __repr__(self):
-    #     return f'{type(self).__name__}({ {key: val for key, val in self.__dict__.items() if not hasattr(val, "__call__")} })'
+    def toStore(self) -> dict:
+        def transform(value):
+            if hasattr(value, 'toStore'):
+                return value.toStore()
+            return value
 
-    def toJson(self) -> dict:
-        return {key: value for key, value in self.__dict__.items() if value is not None
+        return {key: transform(value) for key, value in self.__dict__.items() if value is not None
             and (not isinstance(value, Sized) or len(value) != 0)}
 
     def cleanMisc(self):
@@ -125,6 +135,49 @@ class JsonMessage:
             return getattr(self, 'id') == getattr(other, 'id')
         else:
             return super().__eq__(other)
+
+    @classmethod
+    def memberFromStore(cls, memberName: str, jsonMemberValue: Any) -> Any:
+        '''
+            Provides a callback that subclasses of JsonMessage can override use
+            to simplify their deserialization (fromStore method).
+            Instead of writing full fromStore override, universal version
+            can be used and only individual members not handleable by normal system can
+            be resolved by this method - members that are unknown or handleable by
+            universal solution shall return NotImplemented constant.
+        '''
+        return NotImplemented
+
+    _T = TypeVar('_T', bound='JsonMessage', covariant=True)
+    @classmethod
+    def fromStore(cls: Type[_T], info: dict) -> _T:
+        misc = {}
+        knownInfo = {}
+        fields = {f.name: f for f in dataclasses.fields(cls)}
+        for key, value in info.items():
+            if key in fields and key is not 'misc':
+                FieldType = fields[key].type
+                if hasattr(cls, 'memberFromStore'):
+                    possibleMemberValue = cls.memberFromStore(key, value)
+                    if possibleMemberValue is not NotImplemented:
+                        knownInfo[key] = possibleMemberValue
+                        continue
+                elif hasattr(FieldType, 'fromStore'):
+                    knownInfo[key] = FieldType.fromStore(value)
+                # Not typing-based pseudotype or primitive type
+                elif isinstance(FieldType, type):
+                    if issubclass(FieldType, Enum):
+                        knownInfo[key] = FieldType[value]
+                    elif FieldType not in (str, int, float, bool):
+                        knownInfo[key] = FieldType(value)
+                    else:
+                        knownInfo[key] = value
+                else:
+                    logging.error(f"Can't load type `{cls.__name__}` from JSON form automatically, field `{key}` of type `{FieldType.__name__ if hasattr(FieldType, '__name__') else FieldType}` can't be converted.")
+                    raise TypeError
+            else:
+                misc[key] = value
+        return cls(misc=misc, **knownInfo)
 
 @dataclass
 class User(JsonMessage):
@@ -187,6 +240,14 @@ class User(JsonMessage):
         u.cleanMisc()
         return cls(**u.__dict__)
 
+    @classmethod
+    def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
+        if memberName in ('updateTime', 'deleteTime', 'updateAvatarTime'):
+            return Time(jsonMemberValue)
+        elif memberName in ('id', 'nickname', 'position', 'roles', 'avatarFilename'):
+            return jsonMemberValue
+        return NotImplemented
+
     def match(self, locator: EntityLocator) -> bool:
         if hasattr(locator, 'id'):
             return self.id == locator.id
@@ -232,6 +293,14 @@ class Emoji(JsonMessage):
 
         return cls(**e.__dict__)
 
+    @classmethod
+    def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
+        if memberName in ('updateTime', 'deleteTime'):
+            return Time(jsonMemberValue)
+        elif memberName in ('id', 'creatorId', 'creatorName', 'imageFileName'):
+            return jsonMemberValue
+        return NotImplemented
+
 @dataclass
 class FileAttachment(JsonMessage):
     id: Id
@@ -276,11 +345,20 @@ class FileAttachment(JsonMessage):
 
         return cls(**f.__dict__)
 
+    @classmethod
+    def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
+        if memberName in ('updateTime', 'deleteTime'):
+            return Time(jsonMemberValue)
+        elif memberName in ('id',):
+            return jsonMemberValue
+        return NotImplemented
+
 @dataclass
 class PostReaction(JsonMessage):
     userId: Id
     createTime: Time
     emojiName: str
+    emojiId: Optional[Id] = None
 
     emoji: Optional[Emoji] = None # redundant
     userName: Optional[str] = None # redundant
@@ -298,6 +376,16 @@ class PostReaction(JsonMessage):
         r.cleanMisc()
 
         return cls(**r.__dict__)
+
+    @classmethod
+    def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
+        if memberName in ('updateTime', 'deleteTime'):
+            return Time(jsonMemberValue)
+        elif memberName in ('userId', 'emojiId', 'userName'):
+            return jsonMemberValue
+        elif memberName == 'emoji':
+            return Emoji.fromStore(jsonMemberValue)
+        return NotImplemented
 
 @dataclass
 class Post(JsonMessage):
@@ -318,8 +406,6 @@ class Post(JsonMessage):
     rootPostId: Optional[Id] = None
 
     specialMsgType: Optional[str] = None
-    # Set only if specialMsgType is nonempty
-    specialMsgProperties: Optional[dict] = None
 
     # May contain emojis directly or indirectly
     emojis: Union[List[Emoji], List[Id]] = dataclassfield(default_factory=list)
@@ -419,6 +505,20 @@ class Post(JsonMessage):
     def __str__(self):
         return f'Post(u={self.userId}, t={self.createTime}, m={self.message})'
 
+    @classmethod
+    def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
+        if memberName in ('updateTime', 'publicUpdateTime', 'deleteTime'):
+            return Time(jsonMemberValue)
+        # Note: emojis from JSON shall be only List[str]
+        elif memberName in ('id', 'userId', 'isPinned', 'parentPostId', 'rootPostId', 'specialMsgType', 'emojis', 'userName'):
+            return jsonMemberValue
+        elif memberName == 'attachments':
+            assert isinstance(jsonMemberValue, list)
+            return [FileAttachment.fromStore(a) for a in jsonMemberValue]
+        elif memberName == 'reactions':
+            assert isinstance(jsonMemberValue, list)
+            return [PostReaction.fromStore(r) for r in jsonMemberValue]
+        return NotImplemented
 
 class ChannelType(Enum):
     Open = 'O'
@@ -427,14 +527,14 @@ class ChannelType(Enum):
     Direct = 'D'
 
     @classmethod
-    def load(cls, info: str) -> 'ChannelType':
+    def fromMattermost(cls, info: str) -> 'ChannelType':
         for member in cls:
             if member.value == info:
                 return member
         logging.warning(f"Unknown channel type '{info}', assumed open.")
         return ChannelType.Open
 
-    def toJson(self) -> str:
+    def toStore(self) -> str:
         return self.name
 
 @dataclass
@@ -449,7 +549,7 @@ class Channel(JsonMessage):
 
     creatorUserId: Optional[Id] = None
     updateTime: Optional[Time] = None
-    deletionTime: Optional[Time] = None
+    deleteTime: Optional[Time] = None
     header: Optional[str] = None
     purpose: Optional[str] = None
 
@@ -473,8 +573,8 @@ class Channel(JsonMessage):
             ch.updateTime = Time(x)
         x = ch.extract('delete_at')
         if x != 0:
-            ch.deletionTime = Time(x)
-        ch.type = ChannelType.load(ch.extract('type'))
+            ch.deleteTime = Time(x)
+        ch.type = ChannelType.fromMattermost(ch.extract('type'))
         x = ch.extract('header')
         if x:
             ch.header = x
@@ -499,10 +599,22 @@ class Channel(JsonMessage):
     def __str__(self) -> str:
         return f'Channel({self.internalName})'
 
-    def toJson(self, includeMembers = True) -> dict:
-        return { key: value for key, value in super().toJson().items()
+    def toStore(self, includeMembers = True) -> dict:
+        return { key: value for key, value in super().toStore().items()
             if (includeMembers or key != 'members')
         }
+
+    @classmethod
+    def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
+        if memberName in ('updateTime', 'deleteTime'):
+            return Time(jsonMemberValue)
+        # Note: emojis from JSON shall be only List[str]
+        elif memberName in ('id', 'creatorUserId', 'header', 'purpose'):
+            return jsonMemberValue
+        elif memberName == 'members':
+            assert isinstance(jsonMemberValue, list)
+            return [User.fromStore(u) for u in jsonMemberValue]
+        return NotImplemented
 
     def match(self, locator: EntityLocator) -> bool:
         if hasattr(locator, 'id'):
@@ -519,14 +631,14 @@ class TeamType(Enum):
     InviteOnly = 'I'
 
     @classmethod
-    def load(cls, info: str) -> 'TeamType':
+    def fromMattermost(cls, info: str) -> 'TeamType':
         for member in cls:
             if member.value == info:
                 return member
         logging.warning(f"Unknown team type '{info}', assumed open.")
         return TeamType.Open
 
-    def toJson(self) -> str:
+    def toStore(self) -> str:
         return self.name
 
 @dataclass
@@ -584,10 +696,18 @@ class Team(JsonMessage):
 
         return cls(**t.__dict__)
 
-    def toJson(self, includeChannels = True) -> dict:
-        return { key: value for key, value in super().toJson().items()
+    def toStore(self, includeChannels = True) -> dict:
+        return { key: value for key, value in super().toStore().items()
             if (includeChannels or key != 'channels')
         }
+
+    @classmethod
+    def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
+        if memberName in ('updateTime', 'deleteTime', 'updateAvatarTime'):
+            return Time(jsonMemberValue)
+        elif memberName in ('id', 'description', 'inviteId'):
+            return jsonMemberValue
+        return NotImplemented
 
     def __str__(self):
         return f'Team({self.internalName})'

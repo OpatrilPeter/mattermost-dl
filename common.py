@@ -2,7 +2,9 @@
     Common includes for whole project
 '''
 
+from copy import copy
 from dataclasses import dataclass, field as dataclassfield
+import enum
 from enum import Enum
 import logging
 import os
@@ -12,5 +14,5 @@ import sys
 from typing import (
     Any, BinaryIO, Callable, cast,
     Collection, Dict, Iterable, List, NewType, NoReturn,
-    Optional, Set, Sized, TextIO, Tuple, TypeVar, Union
+    Optional, Set, Sized, TextIO, Tuple, Type, TypeVar, Union
 )

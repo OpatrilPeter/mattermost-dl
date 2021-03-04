@@ -4,13 +4,14 @@
 
 from bo import *
 from common import *
-from config import ChannelOptions, ChannelSpec, ConfigFile, GroupChannelSpec
+from config import ChannelOptions, ChannelSpec, ConfigFile, GroupChannelSpec, OrderDirection
 from driver import MattermostDriver
 import progress
-from store import ChannelHeader
+from store import ChannelHeader, PostOrdering, PostStorage
 
 import json
 from mimetypes import guess_extension
+import traceback
 
 @dataclass
 class ChannelRequest:
@@ -34,8 +35,8 @@ class Saver:
 
     def jsonDumpToFile(self, obj, fp):
         def fallback(obj):
-            if hasattr(obj, 'toJson'):
-                return obj.toJson()
+            if hasattr(obj, 'toStore'):
+                return obj.toStore()
             return str(obj)
 
         json.dump(obj, fp, default=fallback, ensure_ascii=False)
@@ -282,7 +283,7 @@ class Saver:
             emoji.imageFileName = filename
         self.processFiles(emojis, directoryName, 'emojis',
             getFilenameFromEntity=lambda e: e.name,
-            shouldDownload=lambda e: True,
+            shouldDownload=lambda _: True,
             getUrlFromEntity=lambda e: self.driver.getEmojiUrl(e),
             storeFilename=storeFilename,
             redownload=redownload
@@ -293,7 +294,7 @@ class Saver:
             user.avatarFilename = avatarFilename
         self.processFiles(users, directoryName, 'user avatars',
             getFilenameFromEntity=lambda u: u.name,
-            shouldDownload=lambda u: True,
+            shouldDownload=lambda _: True,
             getUrlFromEntity=lambda u: self.driver.getAvatarUrl(u),
             storeFilename=storeFilename,
             redownload=redownload
@@ -319,6 +320,145 @@ class Saver:
         return (not self.configfile.verboseMode
             and self.configfile.reportProgress.mode != progress.VisualizationMode.DumbTerminal)
 
+    def reduceChannelDownloadConstraints(self, channelOptions: ChannelOptions, storage: PostStorage) -> Union[None, Tuple[ChannelOptions, bool]]:
+        '''
+            Updates constraints in channel options based on what's already downloaded in archive.
+
+            @param storage archive's storage
+            @returns either
+                - None if no download is necessary
+                - pair of updated ChannelOptions and trimArchive flag
+        '''
+
+        options = copy(channelOptions)
+
+        if options.downloadTimeDirection == OrderDirection.Asc:
+            if options.postsAfterId is not None:
+                if options.postsAfterId == storage.firstPostId:
+                    options.postsAfterId = storage.lastPostId
+                    options.postsAfterTime = storage.lastPostTime
+                elif options.postsAfterId == storage.lastPostId:
+                    options.postsAfterTime = storage.lastPostTime
+                else:
+                    options.postsAfterTime = self.driver.getPostById(options.postsAfterId).createTime
+            else:
+                options.postsAfterId = storage.lastPostId
+                options.postsAfterTime = storage.lastPostTime
+            if options.postsBeforeId is not None:
+                if (options.postsBeforeId == storage.firstPostId
+                    or options.postsBeforeId == storage.lastPostId):
+                    return None
+                else:
+                    options.postsBeforeTime = self.driver.getPostById(options.postsBeforeId).createTime
+
+            if options.postsAfterTime is not None:
+                if (options.postsAfterTime < storage.firstPostTime and storage.postBeforeFirst is not None
+                    or options.postsAfterTime > storage.lastPostTime):
+                    return channelOptions, True
+                else:
+                    options.postsAfterId = storage.lastPostId
+                    options.postsAfterTime = storage.lastPostTime
+            if options.postsBeforeTime is not None:
+                if options.postsBeforeTime < storage.firstPostTime:
+                    if storage.postBeforeFirst is None:
+                        return None
+                    else:
+                        return options, True
+                elif options.postsBeforeTime > storage.lastPostTime:
+                    if options.postsAfterTime is not None and options.postsAfterTime <= options.postsBeforeTime: # type: ignore
+                        return None
+                    else:
+                        pass
+                else: # In archive
+                    return None
+            return options, False
+        else: # options.downloadTimeDirection == OrderDirection.Desc
+            # Mirrored all conditions from above branch in other time direction
+            if options.postsBeforeId is not None:
+                if options.postsBeforeId == storage.firstPostId:
+                    options.postsBeforeId = storage.lastPostId
+                    options.postsBeforeTime = storage.lastPostTime
+                elif options.postsBeforeId == storage.lastPostId:
+                    options.postsBeforeTime = storage.lastPostTime
+                else:
+                    options.postsBeforeTime = self.driver.getPostById(options.postsBeforeId).createTime
+            else:
+                options.postsBeforeId = storage.lastPostId
+                options.postsBeforeTime = storage.lastPostTime
+            if options.postsAfterId is not None:
+                if (options.postsAfterId == storage.firstPostId
+                    or options.postsAfterId == storage.lastPostId):
+                    return None
+                else:
+                    options.postsAfterTime = self.driver.getPostById(options.postsAfterId).createTime
+
+            if options.postsBeforeTime is not None:
+                if (options.postsBeforeTime > storage.firstPostTime and storage.postBeforeFirst is not None
+                    or options.postsBeforeTime < storage.lastPostTime):
+                    return channelOptions, True
+                else:
+                    options.postsBeforeId = storage.lastPostId
+                    options.postsBeforeTime = storage.lastPostTime
+            if options.postsAfterTime is not None:
+                if options.postsAfterTime > storage.firstPostTime:
+                    if storage.postBeforeFirst is None:
+                        return None
+                    else:
+                        return options, True
+                elif options.postsAfterTime < storage.lastPostTime:
+                    if options.postsBeforeTime is not None and options.postsAfterTime <= options.postsBeforeTime: # type: ignore
+                        return None
+                    else:
+                        pass
+                else: # In archive
+                    return None
+
+            return options, False
+
+    def getChannelDownloaderParams(self, options: ChannelOptions, archiveHeader: Optional[ChannelHeader]) -> Union[None, Tuple[bool, Dict[str, Any]]]:
+        '''
+            Returns params suitable for MattermostDriver's post downloading
+            and indicator whether current archive content is suitable for appending.
+            If archive's channel header indicates that all required posts are already present, returns None.
+        '''
+        params: Dict[str, Any] = {
+            'timeDirection': options.downloadTimeDirection
+        }
+
+        if options.postLimit > 0:
+            params.update(maxCount=options.postLimit)
+
+        emptyArchive = archiveHeader is None or archiveHeader.storage is None
+        truncateArchive = options.redownload
+
+        if not emptyArchive:
+            assert archiveHeader.storage is not None
+
+            newOrganization = PostOrdering.AscendingContinuous if options.downloadTimeDirection == OrderDirection.Asc else PostOrdering.DescendingContinuous
+            if newOrganization != archiveHeader.storage.organization:
+                truncateArchive = True
+            else:
+                optionsPack = self.reduceChannelDownloadConstraints(options, archiveHeader.storage)
+                if optionsPack is None:
+                    return None
+                options, truncateArchiveTmp = optionsPack
+                if truncateArchiveTmp:
+                    truncateArchive = True
+
+        # Handling of empty (or about-to-be-truncated) archive
+        if options.postsAfterId:
+            params.update(afterPost=options.postsAfterId)
+        elif options.postsAfterTime:
+            if options.postsBeforeTime and options.postsBeforeTime >= options.postsAfterTime: # type: ignore
+                return None
+            params.update(afterTime=options.postsAfterTime)
+        if options.postsBeforeId:
+            params.update(beforePost=options.postsBeforeId)
+        elif options.postsBeforeTime:
+            params.update(beforeTime=options.postsBeforeTime)
+
+        return truncateArchive, params
+
     def processChannel(self, channelOutfile: str, header: ChannelHeader, channelRequest: ChannelRequest):
         channel, options = channelRequest.metadata, channelRequest.config
 
@@ -328,99 +468,95 @@ class Saver:
         attachments: List[FileAttachment] = []
 
         headerExists = headerFilename.is_file()
+        archiveHeader: Optional[ChannelHeader] = None
+        truncateData: bool = True
 
         with open(headerFilename, 'r+' if headerExists else 'w') as headerFile:
             if headerExists:
                 try:
-                    header.load(json.load(headerFile), driver=self.driver)
-                except json.JSONDecodeError as err:
-                    logging.warning(f"Unable to load previously saved metadata for channel {channel.internalName}, generating from scratch.\nError: {err}")
+                    archiveHeader = ChannelHeader.fromStore(json.load(headerFile))
+                    truncateData = False
+                except Exception as err:
+                    excInfo = sys.exc_info()
+                    assert excInfo is not None
+                    tbText = ''.join(traceback.format_tb(excInfo[2]))
+                    logging.warning(f"Unable to load previously saved metadata for channel {channel.internalName}, generating from scratch.\nReason: {err}\nTraceback:\n{tbText}")
+                    del excInfo
 
-            firstLoadedPost: Optional[Post] = None
-            lastLoadedPost: Optional[Post] = None
+                # We delete header before we start downloading to ensure header content is consistent if download gets interrupted
+                headerFile.seek(0)
+                headerFile.truncate()
 
             if options.postLimit != 0:
-                postIndex: int = 0
+                # Used for display
+                estimatedPostLimit: int
                 if options.postLimit != -1:
-                    estimatedPostLimit: int = min(channel.messageCount, options.postLimit)
+                    estimatedPostLimit = min(channel.messageCount, options.postLimit)
                 else:
-                    estimatedPostLimit: int = channel.messageCount
-                with open(postsFilename, 'w') as output:
-                    params: Dict[str, Any] = {
-                        'timeDirection': options.downloadTimeDirection
-                    }
-                    if options.postLimit > 0:
-                        params.update(maxCount=options.postLimit)
-                    if options.postsAfterId:
-                        if options.redownload and header.lastPostTime:
-                            selectedPostTime = self.driver.getPostById(options.postsAfterId).createTime
-                            if header.lastPostTime > selectedPostTime:
-                                params.update(afterPost=header.lastPostId)
-                            else:
-                                params.update(afterPost=options.postsAfterId)
-                        else:
-                            params.update(afterPost=options.postsAfterId)
-                    elif options.redownload and header.lastPostId:
-                        params.update(afterPost=header.lastPostId)
-                    if options.postsBeforeId:
-                        params.update(beforePost=options.postsBeforeId)
-                    if options.postsAfterTime:
-                        if options.redownload and header.lastPostTime:
-                            params.update(afterTime=max(options.postsAfterTime, header.lastPostTime))
-                        else:
-                            params.update(afterTime=options.postsAfterTime)
-                    elif options.redownload and header.lastPostTime and not header.lastPostId:
-                        params.update(afterTime=header.lastPostTime)
-                    if options.postsBeforeTime:
-                        params.update(beforeTime=options.postsBeforeTime)
+                    estimatedPostLimit = channel.messageCount
 
-                    if self.showProgressReport():
-                        progressReporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
-                            contentPadding=10, contentAlignLeft=False,
-                            header='Progress: ', footer=f'/{estimatedPostLimit} posts (upper limit approximate)')
-                        progressReporter.open()
-                        progressReporter.update(f'0')
-                    else:
-                        progressReporter = None
+                header.storage = PostStorage.empty()
+                if options.downloadTimeDirection == OrderDirection.Asc:
+                    header.storage.organization = PostOrdering.AscendingContinuous
+                else:
+                    assert options.downloadTimeDirection == OrderDirection.Desc
+                    header.storage.organization = PostOrdering.DescendingContinuous
 
-                    takeEmojis: bool = options.emojiMetadata or options.downloadEmoji
+                paramPack = self.getChannelDownloaderParams(options=options, archiveHeader=archiveHeader)
+                if paramPack is not None:
+                    truncateDataTmp, params = paramPack
+                    if truncateDataTmp:
+                        truncateData = True
+                    if truncateData and archiveHeader is not None:
+                        # We're dropping old archive, so we can drop old header, too
+                        archiveHeader = None
 
-                    def perPost(p: Post, hints: MattermostDriver.PostHints):
-                        nonlocal postIndex
-                        nonlocal firstLoadedPost, lastLoadedPost
-
-                        header.usedUsers.add(self.driver.getUserById(p.userId))
-                        if options.downloadAttachments:
-                            for attachment in p.attachments:
-                                attachments.append(attachment)
-                        self.enrichPost(p)
-                        if p.emojis:
-                            if takeEmojis:
-                                for emoji in p.emojis:
-                                    assert isinstance(emoji, Emoji)
-                                    header.usedEmojis.add(emoji)
-                                p.emojis = [cast(Emoji, emoji).id for emoji in p.emojis]
-                            else:
-                                p.emojis = []
-                        self.jsonDumpToFile(p.toJson(), output)
-                        output.write('\n')
-
-                        # if hints.firstPost:
-                        #     firstPostId = p.id
-                        #     firstPostTime = p.createTime
-                        if firstLoadedPost is None:
-                            firstLoadedPost = p
-                        lastLoadedPost = p
-
-                        postIndex += 1
+                    with open(postsFilename, 'w' if truncateData else 'a+') as output:
                         if self.showProgressReport():
-                            progressReporter.update(str(postIndex))
+                            progressReporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
+                                contentPadding=10, contentAlignLeft=False,
+                                header='Progress: ', footer=f'/{estimatedPostLimit} posts (upper limit approximate)')
+                            progressReporter.open()
+                            progressReporter.update(f'0')
+                        else:
+                            progressReporter = None
 
-                    self.driver.processPosts(processor=perPost, channel=channel, **params)
+                        takeEmojis: bool = options.emojiMetadata or options.downloadEmoji
 
-                    if self.showProgressReport():
-                        progressReporter.close()
-                    logging.info('Processed all posts.')
+                        def perPost(p: Post, hints: MattermostDriver.PostHints):
+                            header.usedUsers.add(self.driver.getUserById(p.userId))
+                            if options.downloadAttachments:
+                                for attachment in p.attachments:
+                                    attachments.append(attachment)
+                            self.enrichPost(p)
+                            if p.emojis:
+                                if takeEmojis:
+                                    for emoji in p.emojis:
+                                        assert isinstance(emoji, Emoji)
+                                        header.usedEmojis.add(emoji)
+                                    p.emojis = [cast(Emoji, emoji).id for emoji in p.emojis]
+                                else:
+                                    p.emojis = []
+                            self.jsonDumpToFile(p.toStore(), output)
+                            output.write('\n')
+
+                            if header.storage.count == 0:
+                                header.storage.firstPostId = p.id
+                                header.storage.firstPostTime = p.createTime
+                                header.storage.postBeforeFirst = hints.postIdBefore if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdAfter
+                            header.storage.lastPostId = p.id
+                            header.storage.lastPostTime = p.createTime
+                            header.storage.postAfterLast = hints.postIdAfter if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdBefore
+
+                            header.storage.count += 1
+                            if self.showProgressReport():
+                                progressReporter.update(str(header.storage.count))
+
+                        self.driver.processPosts(processor=perPost, channel=channel, **params)
+
+                        if self.showProgressReport():
+                            progressReporter.close()
+                        logging.info('Processed all posts.')
 
             if options.emojiMetadata:
                 for emoji in header.usedEmojis:
@@ -434,10 +570,12 @@ class Saver:
             if options.downloadAvatars:
                 self.processAvatars('avatars', users=header.usedUsers)
 
-            if headerExists:
-                headerFile.seek(0)
-                headerFile.truncate()
-            self.jsonDumpToFile(header.save(), headerFile)
+            # Add to header content that is only relevant for nonfresh posts
+            if archiveHeader is not None:
+                archiveHeader.update(header)
+                header = archiveHeader
+
+            self.jsonDumpToFile(header.toStore(), headerFile)
 
 
     def processDirectChannel(self, otherUser: User, channelRequest: ChannelRequest):

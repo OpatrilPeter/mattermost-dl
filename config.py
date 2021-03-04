@@ -8,8 +8,8 @@ import dataclasses
 import json
 
 # Options are All (true), None (false), or explicit list
-T = TypeVar('T')
-EntityList = Union[bool, List[T]]
+_T = TypeVar('_T')
+EntityList = Union[bool, List[_T]]
 
 class OrderDirection(Enum):
     Asc = 0
@@ -127,7 +127,7 @@ class TeamSpec:
             if len(info['publicChannels']) == 0:
                 self.publicChannels = False
             else:
-                self.publicChannels = [ChannelSpec(chan, self.privateChannelDefaults) for chan in info['publicChannels']]
+                self.publicChannels = [ChannelSpec(chan, self.publicChannelDefaults) for chan in info['publicChannels']]
 
 @dataclass
 class ConfigFile:
