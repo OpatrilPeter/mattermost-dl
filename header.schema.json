@@ -1,0 +1,321 @@
+{
+    "$schema": "http://json-schema.org/schema",
+    "description": "Describes metadata for given channel.",
+    "definitions": {
+        "misc": {
+            "description": "Miscallaneous unrecognized properties of the object. Generally, any additional fetched property that is not known to be (un)useable ends up here.",
+            "type": "object"
+        }
+    },
+    "required": [
+        "version",
+        "channel"
+    ],
+    "properties": {
+        "version": {
+            "description": "Version of the format.",
+            "type": "string",
+            "pattern": "^0\\.?.*"
+        },
+        "channel": {
+            "description": "Channel's metadata.",
+            "type": "object",
+            "required": [
+                "id",
+                "internalName",
+                "createTime",
+                "type",
+                "messageCount"
+            ],
+            "properties": {
+                "id": {
+                    "description": "Channel's unique ID.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Channel's displayed name. May be ommited for unnamed channels (such as direct ones).",
+                    "type": "string"
+                },
+                "internalName": {
+                    "description": "Channel's internal name in the system.",
+                    "type": "string"
+                },
+                "creatorUserId": {
+                    "description": "User ID of the channel's author.",
+                    "type": "string"
+                },
+                "createTime": {
+                    "description": "Time at which channel was created, in miliseconds since 1970-01-01.",
+                    "type": "integer"
+                },
+                "updateTime": {
+                    "description": "Time at which channel was last updated, in miliseconds since 1970-01-01.",
+                    "type": "integer"
+                },
+                "deleteTime": {
+                    "description": "Time at which channel was marked as deleted, in miliseconds since 1970-01-01.",
+                    "type": "integer"
+                },
+                "type": {
+                    "description": "Channel's category",
+                    "type": "string",
+                    "enum": [
+                        "Open",
+                        "Private",
+                        "Group",
+                        "Direct"
+                    ]
+                },
+                "messageCount": {
+                    "description": "Approximate total number of channel's posts.",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "header": {
+                    "description": "Channel's header. Always shown on the screen and often used for shortcuts.",
+                    "type": "string"
+                },
+                "purpose": {
+                    "description": "Short synopsis of channel's purpose.",
+                    "type": "string"
+                },
+                "lastMessageTime": {
+                    "description": "Time of the creation for the latest post, in miliseconds sinde 1970-01-01.",
+                    "type": "integer"
+                },
+                "misc": {
+                    "$ref": "#/definitions/misc"
+                }
+            }
+        },
+        "storage": {
+            "description": "Information about the message storage's contents.",
+            "type": "object",
+            "required": [
+                "count",
+                "organization"
+            ],
+            "properties": {
+                "count": {
+                    "description": "Amount of messages in the store.",
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "organization": {
+                    "description": "In what order are the messages sorted (from beggining of the storage toward the end). Continuous variants additionally contain all messages available in the time span from first post in storge to the last.",
+                    "type": "string",
+                    "enum": [
+                        "Unsorted",
+                        "Ascending",
+                        "Descending",
+                        "AscendingContinuous",
+                        "DescendingContinuous"
+                    ]
+                },
+                "beginTime": {
+                    "description": "Start of the time range covered by the storage, in miliseconds since 1970-01-01. For example, in AscendingContinuous organization, begin time of 2000-01-01T00:00:00 would mean any posts after that time point are covered.",
+                    "type": "integer"
+                },
+                "endTime": {
+                    "description": "End of the time range covered by the storage, in miliseconds since 1970-01-01. See beginTime for explanation.",
+                    "type": "integer"
+                },
+                "firstPostId": {
+                    "description": "Post ID of the first post in storage.",
+                    "type": "string"
+                },
+                "lastPostId": {
+                    "description": "Post ID of the last post in storage.",
+                    "type": "string"
+                },
+                "postIdBeforeFirst": {
+                    "description": "Post ID of the post that would be fetched if we extend the current storage organization beyond the starting point. Ommited if there is no (known) post before first one.",
+                    "type": "string"
+                },
+                "postIdAfterLast": {
+                    "description": "Post ID of the post that would be fetched if we extend the current storage organization beyond the last post. Ommited if there is no (known) post after last one.",
+                    "type": "string"
+                }
+            }
+        },
+        "team": {
+            "description": "Description of Team, a channel collection this channel is part of.",
+            "type": "object",
+            "required": [
+                "id",
+                "name",
+                "internalName",
+                "type",
+                "createTime"
+            ],
+            "properties": {
+                "id": {
+                    "description": "Unique identifier of this Team.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Displayed name of the Team.",
+                    "type": "string"
+                },
+                "internalName": {
+                    "description": "Team's internal name in the system.",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Team's category.",
+                    "type": "string",
+                    "enum": [
+                        "Open",
+                        "InviteOnly"
+                    ]
+                },
+                "createTime": {
+                    "description": "Time at which this team was created, in miliseconds since 1970-01-01.",
+                    "type": "integer"
+                },
+                "updateTime": {
+                    "description": "Time at which this team was last updated, in miliseconds since 1970-01-01.",
+                    "type": "integer"
+                },
+                "deleteTime": {
+                    "description": "Time at which this team was marked as deleted, in miliseconds since 1970-01-01.",
+                    "type": "integer"
+                },
+                "description": {
+                    "description": "Team's description text.",
+                    "type": "string"
+                },
+                "updateAvatarTime": {
+                    "description": "Time of latest update of this Team's icon, if any, represented as number of miliseconds since 1970-01-01.",
+                    "type": "integer"
+                },
+                "inviteId": {
+                    "description": "Invitation ID required to join this Team.",
+                    "type": "string"
+                },
+                "misc": {
+                    "$ref": "#/definitions/misc"
+                }
+            }
+        },
+        "users": {
+            "description": "List of users participating in the channel.",
+            "type": "array",
+            "items": {
+                "description": "Definition of a user.",
+                "type": "object",
+                "required": [
+                    "id",
+                    "name",
+                    "createTime"
+                ],
+                "properties": {
+                    "id": {
+                        "description": "Unique identifier of the user.",
+                        "type": "string"
+                    },
+                    "name": {
+                        "description": "User's displayed name.",
+                        "type": "string"
+                    },
+                    "nickname": {
+                        "description": "User's customized nickname.",
+                        "type": "string"
+                    },
+                    "firstName": {
+                        "description": "User's first name, if known.",
+                        "type": "string"
+                    },
+                    "lastName": {
+                        "description": "User's last name, if known.",
+                        "type": "string"
+                    },
+                    "position": {
+                        "description": "User's occupation.",
+                        "type": "string"
+                    },
+                    "roles": {
+                        "description": "List of roles (privileges) user has. The most common situation where user is just common user is not considered notable for inclusion.",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "createTime": {
+                        "description": "Time at which user was created, in miliseconds since 1970-01-01.",
+                        "type": "integer"
+                    },
+                    "updateTime": {
+                        "description": "Time at which user was last updated, in miliseconds since 1970-01-01.",
+                        "type": "integer"
+                    },
+                    "deleteTime": {
+                        "description": "Time at which user was marked as deleted, in miliseconds since 1970-01-01.",
+                        "type": "integer"
+                    },
+                    "updateAvatarTime": {
+                        "description": "Last time user's icon was updated since account's addition, in miliseconds since 1970-01-01.",
+                        "type": "integer"
+                    },
+                    "avatarFileName": {
+                        "description": "File name of the picture serving as user's avatar.",
+                        "type": "string"
+                    },
+                    "misc": {
+                        "$ref": "#/definitions/misc"
+                    }
+                }
+            }
+        },
+        "emojis": {
+            "description": "List of emojis used in the channel.",
+            "type": "array",
+            "items": {
+                "description": "Definition of non-unicode emoji.",
+                "type": "object",
+                "required": [
+                    "id",
+                    "name",
+                    "createTime"
+                ],
+                "properties": {
+                    "id": {
+                        "description": "Unique identifier on an emoji.",
+                        "type": "string"
+                    },
+                    "name": {
+                        "description": "Emoji's name, used to invoke it in messages.",
+                        "type": "string"
+                    },
+                    "creatorId": {
+                        "description": "Identifier of the user who added this emoji.",
+                        "type": "string"
+                    },
+                    "creatorName": {
+                        "description": "Name of the user who added this emoji.",
+                        "type": "string"
+                    },
+                    "createTime": {
+                        "description": "Time at which this emoji was created, in miliseconds since 1970-01-01.",
+                        "type": "integer"
+                    },
+                    "updateTime": {
+                        "description": "Time at which this emoji was last updated, in miliseconds since 1970-01-01.",
+                        "type": "integer"
+                    },
+                    "deleteTime": {
+                        "description": "Time at which this emoji was marked as deleted, in miliseconds since 1970-01-01.",
+                        "type": "integer"
+                    },
+                    "imageFileName": {
+                        "description": "File name of the image representing this emoji.",
+                        "type": "string"
+                    },
+                    "misc": {
+                        "$ref": "#/definitions/misc"
+                    }
+                }
+            }
+        }
+    }
+}
