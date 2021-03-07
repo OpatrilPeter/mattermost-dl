@@ -45,15 +45,15 @@ class PostStorage(JsonMessage):
     count: int = 0
     organization: PostOrdering = PostOrdering.Unsorted
     # If the first post is not completely first, here is post that we known to be before it (respecting ordering)
-    postBeforeFirst: Optional[Id] = None
-    # Create time of first post in the storage
-    firstPostTime: Time = Time(0)
+    postIdBeforeFirst: Optional[Id] = None
+    # Create time of first post in the storage or some time point before it, if there are no posts up to that
+    beginTime: Time = Time(0)
     firstPostId: Id = Id('')
-    # Create time of last post in the storage
-    lastPostTime: Time = Time(0)
+    # Create time of last post in the storage or some time point after it, if there are no posts up to that
+    endTime: Time = Time(0)
     lastPostId: Id = Id('')
     # If the post is not latest, this one shall be after it (respecting ordering)
-    postAfterLast: Optional[Id] = None
+    postIdAfterLast: Optional[Id] = None
 
     @staticmethod
     def empty() -> 'PostStorage':
@@ -62,15 +62,15 @@ class PostStorage(JsonMessage):
     def extend(self, other: 'PostStorage'):
         assert other.organization == self.organization
         if other.count > 0:
-            assert self.lastPostId == other.postBeforeFirst
+            assert self.lastPostId == other.postIdBeforeFirst
             self.count += other.count
             self.lastPostId = other.lastPostId
-            self.lastPostTime = other.lastPostTime
-            self.postAfterLast = other.postAfterLast
+            self.endTime = other.endTime
+            self.postIdAfterLast = other.postIdAfterLast
 
     @classmethod
     def memberFromStore(cls, memberName: str, jsonMemberValue: Any) -> Any:
-        if memberName in ('firstPostId', 'lastPostId', 'postBeforeFirst', 'postAfterLast'):
+        if memberName in ('firstPostId', 'lastPostId', 'postIdBeforeFirst', 'postIdAfterLast'):
             return jsonMemberValue
         return NotImplemented
 
@@ -93,6 +93,14 @@ class ChannelHeader:
         class _Header:
             pass
         self = cast(ChannelHeader, _Header())
+        if 'version' not in info:
+            logging.warning('Channel metadata is missing versioning information, it may not be loadable and some data may be lost.')
+        elif not isinstance(info['version'], str) or not re.match(r'^\d+(\.\d+(\.\d+)?.*)?', info['version']):
+            logging.warning(f'Channel metadata is not having recognized {info["version"]}, it may not be loadable and some data may be lost.')
+        else:
+            version = info['version']
+            if not re.match(r'^0\.?.*', version):
+                logging.warning(f'Loading channel from future version {version}, current version is 0. It may not be loadable and some data may be lost.')
         self.channel = Channel.fromStore(info['channel'])
         if 'users' in info:
             self.usedUsers = set()
@@ -121,7 +129,9 @@ class ChannelHeader:
         self.usedEmojis = other.usedEmojis | self.usedEmojis
 
     def toStore(self) -> dict:
-        content = {}
+        content: Dict[str, Any] = {
+            'version': '0'
+        }
         if self.team:
             content.update(team=self.team.toStore(includeChannels=False))
         content.update(channel=self.channel.toStore())

@@ -237,9 +237,9 @@ class MattermostDriver:
     @dataclass
     class PostHints:
         processedCount: int = 0
-        # Id of post precceeding current one. None if the post is first in channel
+        # Id of post directly chronologically preceding current one. None if the post is first in channel
         postIdBefore: Optional[Id] = None
-        # Id of post succeeding current one. None if the post is last in channel
+        # Id of post directly chronologically succeeding current one. None if the post is last in channel
         postIdAfter: Optional[Id] = None
 
     # REFACTORME: this function could be simplified, possibly separate downloading from filtering by additional callbacks
@@ -328,8 +328,8 @@ class MattermostDriver:
             if timeDirection == OrderDirection.Desc:
                 for windowIndex, postId in enumerate(postWindow['order'][pageOffset:]):
                     p = postWindow['posts'][postId]
-                    postHints.postIdAfter = postWindow['order'][windowIndex + 1] if windowIndex + 1 < len(postWindow['order']) else postWindow['prev_post_id'] if postWindow['prev_post_id'] != '' else None
-                    postHints.postIdBefore = postWindow['order'][windowIndex - 1] if windowIndex - 1 >= 0 else postWindow['next_post_id'] if postWindow['next_post_id'] != '' else None
+                    postHints.postIdBefore = postWindow['order'][windowIndex + 1] if windowIndex + 1 < len(postWindow['order']) else postWindow['prev_post_id'] if postWindow['prev_post_id'] != '' else None
+                    postHints.postIdAfter = postWindow['order'][windowIndex - 1] if windowIndex - 1 >= 0 else postWindow['next_post_id'] if postWindow['next_post_id'] != '' else None
                     if ((afterPost and p['id'] == afterPost)
                         or (afterTime and p['create_at'] < afterTime.timestamp)
                         or (maxCount and postHints.processedCount == maxCount)):
@@ -345,6 +345,7 @@ class MattermostDriver:
                     p = postWindow['posts'][postId]
                     postHints.postIdBefore = postWindow['order'][windowIndex + 1] if windowIndex + 1 < len(postWindow['order']) else postWindow['prev_post_id'] if postWindow['prev_post_id'] != '' else None
                     postHints.postIdAfter = postWindow['order'][windowIndex - 1] if windowIndex - 1 >= 0 else postWindow['next_post_id'] if postWindow['next_post_id'] != '' else None
+                    windowIndex -= 1
                     if ((beforePost and p['id'] == beforePost)
                         or (beforeTime and p['create_at'] > beforeTime.timestamp)
                         or (maxCount and postHints.processedCount == maxCount)):
@@ -354,7 +355,6 @@ class MattermostDriver:
                         continue
                     processor(Post.fromMattermost(p), postHints)
                     postHints.processedCount += 1
-                    windowIndex -= 1
 
             # No messages recieved?
             if len(postWindow['order']) == 0:

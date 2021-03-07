@@ -291,7 +291,7 @@ class Saver:
 
     def processAvatars(self, directoryName: str, users: Collection[User], redownload: bool = False):
         def storeFilename(user: User, avatarFilename: str):
-            user.avatarFilename = avatarFilename
+            user.avatarFileName = avatarFilename
         self.processFiles(users, directoryName, 'user avatars',
             getFilenameFromEntity=lambda u: u.name,
             shouldDownload=lambda _: True,
@@ -333,85 +333,82 @@ class Saver:
         options = copy(channelOptions)
 
         if options.downloadTimeDirection == OrderDirection.Asc:
+
+            if options.postsAfterTime is not None:
+                if (options.postsAfterTime < storage.beginTime and storage.postIdBeforeFirst is not None
+                    or options.postsAfterTime > storage.endTime):
+                    return options, True
             if options.postsAfterId is not None:
                 if options.postsAfterId == storage.firstPostId:
                     options.postsAfterId = storage.lastPostId
-                    options.postsAfterTime = storage.lastPostTime
+                    options.postsAfterTime = storage.endTime if options.postsAfterTime is None else max(storage.endTime, options.postsAfterTime)
                 elif options.postsAfterId == storage.lastPostId:
-                    options.postsAfterTime = storage.lastPostTime
+                    options.postsAfterTime = storage.endTime if options.postsAfterTime is None else max(storage.endTime, options.postsAfterTime)
                 else:
-                    options.postsAfterTime = self.driver.getPostById(options.postsAfterId).createTime
+                    postTime = self.driver.getPostById(options.postsAfterId).createTime
+                    options.postsAfterTime = postTime if options.postsAfterTime is None else max(postTime, options.postsAfterTime)
             else:
                 options.postsAfterId = storage.lastPostId
-                options.postsAfterTime = storage.lastPostTime
+                options.postsAfterTime = storage.endTime if options.postsAfterTime is None else max(storage.endTime, options.postsAfterTime)
             if options.postsBeforeId is not None:
                 if (options.postsBeforeId == storage.firstPostId
                     or options.postsBeforeId == storage.lastPostId):
                     return None
                 else:
-                    options.postsBeforeTime = self.driver.getPostById(options.postsBeforeId).createTime
-
-            if options.postsAfterTime is not None:
-                if (options.postsAfterTime < storage.firstPostTime and storage.postBeforeFirst is not None
-                    or options.postsAfterTime > storage.lastPostTime):
-                    return channelOptions, True
-                else:
-                    options.postsAfterId = storage.lastPostId
-                    options.postsAfterTime = storage.lastPostTime
+                    postTime = self.driver.getPostById(options.postsBeforeId).createTime
+                    options.postsBeforeTime = postTime if options.postsBeforeTime is None else max(postTime, options.postsBeforeTime)
             if options.postsBeforeTime is not None:
-                if options.postsBeforeTime < storage.firstPostTime:
-                    if storage.postBeforeFirst is None:
+                if options.postsBeforeTime < storage.beginTime:
+                    if storage.postIdBeforeFirst is None:
                         return None
                     else:
-                        return options, True
-                elif options.postsBeforeTime > storage.lastPostTime:
-                    if options.postsAfterTime is not None and options.postsAfterTime <= options.postsBeforeTime: # type: ignore
-                        return None
-                    else:
-                        pass
-                else: # In archive
+                        return channelOptions, True
+                # In archive
+                elif options.postsBeforeTime <= storage.endTime:  # type: ignore
                     return None
+                else:
+                    if options.postsBeforeTime > options.postsAfterTime: # type: ignore
+                        return None
             return options, False
+
         else: # options.downloadTimeDirection == OrderDirection.Desc
             # Mirrored all conditions from above branch in other time direction
+
+            if options.postsBeforeTime is not None:
+                if (options.postsBeforeTime > storage.beginTime and storage.postIdBeforeFirst is not None
+                    or options.postsBeforeTime < storage.endTime):
+                    return options, True
             if options.postsBeforeId is not None:
                 if options.postsBeforeId == storage.firstPostId:
                     options.postsBeforeId = storage.lastPostId
-                    options.postsBeforeTime = storage.lastPostTime
+                    options.postsBeforeTime = storage.endTime if options.postsBeforeTime is None else min(storage.endTime, options.postsBeforeTime)
                 elif options.postsBeforeId == storage.lastPostId:
-                    options.postsBeforeTime = storage.lastPostTime
+                    options.postsBeforeTime = storage.endTime if options.postsBeforeTime is None else min(storage.endTime, options.postsBeforeTime)
                 else:
-                    options.postsBeforeTime = self.driver.getPostById(options.postsBeforeId).createTime
+                    postTime = self.driver.getPostById(options.postsBeforeId).createTime
+                    options.postsBeforeTime = postTime if options.postsBeforeTime is None else min(options.postsBeforeTime, postTime)
             else:
                 options.postsBeforeId = storage.lastPostId
-                options.postsBeforeTime = storage.lastPostTime
+                options.postsBeforeTime = storage.endTime if options.postsBeforeTime is None else min(storage.endTime, options.postsBeforeTime)
             if options.postsAfterId is not None:
                 if (options.postsAfterId == storage.firstPostId
                     or options.postsAfterId == storage.lastPostId):
                     return None
                 else:
-                    options.postsAfterTime = self.driver.getPostById(options.postsAfterId).createTime
-
-            if options.postsBeforeTime is not None:
-                if (options.postsBeforeTime > storage.firstPostTime and storage.postBeforeFirst is not None
-                    or options.postsBeforeTime < storage.lastPostTime):
-                    return channelOptions, True
-                else:
-                    options.postsBeforeId = storage.lastPostId
-                    options.postsBeforeTime = storage.lastPostTime
+                    postTime = self.driver.getPostById(options.postsAfterId).createTime
+                    options.postsAfterTime = postTime if options.postsAfterTime is None else min(options.postsAfterTime, postTime)
             if options.postsAfterTime is not None:
-                if options.postsAfterTime > storage.firstPostTime:
-                    if storage.postBeforeFirst is None:
+                if options.postsAfterTime > storage.beginTime:
+                    if storage.postIdBeforeFirst is None:
                         return None
                     else:
-                        return options, True
-                elif options.postsAfterTime < storage.lastPostTime:
-                    if options.postsBeforeTime is not None and options.postsAfterTime <= options.postsBeforeTime: # type: ignore
-                        return None
-                    else:
-                        pass
-                else: # In archive
+                        return channelOptions, True
+                # In archive
+                elif options.postsAfterTime >= storage.endTime: # type: ignore
                     return None
+                else:
+                    if options.postsAfterTime > options.postsBeforeTime: # type: ignore
+                        return None
 
             return options, False
 
@@ -431,7 +428,7 @@ class Saver:
         emptyArchive = archiveHeader is None or archiveHeader.storage is None
         truncateArchive = options.redownload
 
-        if not emptyArchive:
+        if not (emptyArchive or truncateArchive):
             assert archiveHeader.storage is not None
 
             newOrganization = PostOrdering.AscendingContinuous if options.downloadTimeDirection == OrderDirection.Asc else PostOrdering.DescendingContinuous
@@ -449,7 +446,7 @@ class Saver:
         if options.postsAfterId:
             params.update(afterPost=options.postsAfterId)
         elif options.postsAfterTime:
-            if options.postsBeforeTime and options.postsBeforeTime >= options.postsAfterTime: # type: ignore
+            if options.postsBeforeTime and options.postsBeforeTime < options.postsAfterTime: # type: ignore
                 return None
             params.update(afterTime=options.postsAfterTime)
         if options.postsBeforeId:
@@ -542,11 +539,14 @@ class Saver:
 
                             if header.storage.count == 0:
                                 header.storage.firstPostId = p.id
-                                header.storage.firstPostTime = p.createTime
-                                header.storage.postBeforeFirst = hints.postIdBefore if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdAfter
+                                if options.downloadTimeDirection == OrderDirection.Asc:
+                                    header.storage.beginTime = p.createTime if options.postsAfterTime is None else min(p.createTime, options.postsAfterTime)
+                                else:
+                                    header.storage.beginTime = p.createTime if options.postsBeforeTime is None else max(p.createTime, options.postsBeforeTime)
+                                header.storage.postIdBeforeFirst = hints.postIdBefore if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdAfter
                             header.storage.lastPostId = p.id
-                            header.storage.lastPostTime = p.createTime
-                            header.storage.postAfterLast = hints.postIdAfter if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdBefore
+                            header.storage.endTime = p.createTime
+                            header.storage.postIdAfterLast = hints.postIdAfter if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdBefore
 
                             header.storage.count += 1
                             if self.showProgressReport():

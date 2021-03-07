@@ -48,17 +48,17 @@ class EntityLocator:
 @total_ordering
 class Time:
     def __init__(self, time: Union[int, str]):
-        self._time: Union[int, float]
+        self._time: int
         # time is unix timestamp in miliseconds
         if isinstance(time, int):
             self._time = time
         else:
             assert isinstance(time, str)
-            self._time = datetime.fromisoformat(time).timestamp() * 1000
+            self._time = int(datetime.fromisoformat(time).timestamp() * 1000)
 
     # Returns unix timestamp in miliseconds
     @property
-    def timestamp(self) -> Union[int, float]:
+    def timestamp(self) -> int:
         return self._time
     def __eq__(self, other: 'Time'):
         return self._time == other._time
@@ -74,7 +74,7 @@ class Time:
     def __repr__(self):
         return f"'{datetime.fromtimestamp(self._time/1000).isoformat()}'"
 
-    def toStore(self) -> Union[int, float]:
+    def toStore(self) -> int:
         return self.timestamp
 
 Id = NewType('Id', str)
@@ -194,7 +194,7 @@ class User(JsonMessage):
     updateAvatarTime: Optional[Time] = None
     position: Optional[str] = None
     roles: List[str] = dataclassfield(default_factory=list)
-    avatarFilename: Optional[str] = None
+    avatarFileName: Optional[str] = None
 
     def __hash__(self):
         return hash(self.id)
@@ -250,7 +250,7 @@ class User(JsonMessage):
     def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
         if memberName in ('updateTime', 'deleteTime', 'updateAvatarTime'):
             return Time(jsonMemberValue)
-        elif memberName in ('id', 'firstName', 'lastName', 'nickname', 'position', 'roles', 'avatarFilename'):
+        elif memberName in ('id', 'firstName', 'lastName', 'nickname', 'position', 'roles', 'avatarFileName'):
             return jsonMemberValue
         return NotImplemented
 
@@ -312,8 +312,8 @@ class FileAttachment(JsonMessage):
     id: Id
     name: str
     byteSize: int
-    mimeType: str
     createTime: Time
+    mimeType: Optional[str] = None
     updateTime: Optional[Time] = None
     deleteTime: Optional[Time] = None
 
@@ -355,7 +355,7 @@ class FileAttachment(JsonMessage):
     def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
         if memberName in ('updateTime', 'deleteTime'):
             return Time(jsonMemberValue)
-        elif memberName in ('id',):
+        elif memberName in ('id', 'mimeType'):
             return jsonMemberValue
         return NotImplemented
 
@@ -363,8 +363,8 @@ class FileAttachment(JsonMessage):
 class PostReaction(JsonMessage):
     userId: Id
     createTime: Time
-    emojiName: str
     emojiId: Optional[Id] = None
+    emojiName: Optional[str] = None
 
     emoji: Optional[Emoji] = None # redundant
     userName: Optional[str] = None # redundant
@@ -546,19 +546,19 @@ class ChannelType(Enum):
 @dataclass
 class Channel(JsonMessage):
     id: Id
-    name: str
     internalName: str
-    creationTime: Time
+    createTime: Time
     type: ChannelType
-    lastMessageTime: Time
     messageCount: int
 
+    name: Optional[str] = None
     creatorUserId: Optional[Id] = None
     updateTime: Optional[Time] = None
     deleteTime: Optional[Time] = None
     header: Optional[str] = None
     purpose: Optional[str] = None
 
+    lastMessageTime: Optional[Time] = None
     members: List[User] = dataclassfield(default_factory=list)
 
     def __hash__(self):
@@ -573,9 +573,9 @@ class Channel(JsonMessage):
         ch.id = ch.extract('id')
         ch.name = ch.extract('display_name')
         ch.internalName = ch.extract('name')
-        ch.creationTime = Time(ch.extract('create_at'))
+        ch.createTime = Time(ch.extract('create_at'))
         x = ch.extract('update_at')
-        if x != ch.creationTime.timestamp:
+        if x != ch.createTime.timestamp:
             ch.updateTime = Time(x)
         x = ch.extract('delete_at')
         if x != 0:
@@ -612,10 +612,9 @@ class Channel(JsonMessage):
 
     @classmethod
     def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
-        if memberName in ('updateTime', 'deleteTime'):
+        if memberName in ('updateTime', 'deleteTime', 'lastMessageTime'):
             return Time(jsonMemberValue)
-        # Note: emojis from JSON shall be only List[str]
-        elif memberName in ('id', 'creatorUserId', 'header', 'purpose'):
+        elif memberName in ('id', 'name', 'creatorUserId', 'header', 'purpose'):
             return jsonMemberValue
         elif memberName == 'members':
             assert isinstance(jsonMemberValue, list)
