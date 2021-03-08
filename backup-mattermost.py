@@ -4,7 +4,7 @@ from sys import version_info
 assert version_info >= (3, 7), "Required at least python 3.7, executed with version "+str(version_info)+"!"
 
 from common import *
-from config import readConfig
+from config import readConfig, ConfigFile
 from saver import Saver
 
 from argparse import ArgumentParser
@@ -15,10 +15,22 @@ argumentParser.add_argument('--verbose','-v', help='Verbose mode.', action='stor
 args = argumentParser.parse_args()
 
 conffile = readConfig(args.conf)
+conffile.verboseMode = args.verbose
 
-if args.verbose:
-    conffile.verboseMode = True
+def setupLogging(conffile: ConfigFile):
+    args = {}
+    if conffile.verboseMode:
+        args.update({
+            'level': logging.DEBUG,
+            'format': '%(asctime)s:%(levelname)s:%(name)s: %(message)s'
+        })
+    else:
+        args.update({
+            'level': logging.INFO,
+            'format': '%(message)s'
+        })
+    logging.basicConfig(**args)
 
-logging.getLogger().setLevel(logging.DEBUG if conffile.verboseMode else logging.INFO)
+setupLogging(conffile)
 
 Saver(conffile)()
