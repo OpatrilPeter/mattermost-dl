@@ -1,12 +1,5 @@
 # Todo list
 
-## next milestone
-
-### feat
-
-- allow to specify config for other team / other users / etc. - if present downloads all, not just whitelist
-- separate maxCount config from sessionDownloadLimit
-
 ## 1.0
 
 ### chore

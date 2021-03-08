@@ -7,9 +7,6 @@ from progress import ProgressSettings
 import dataclasses
 import json
 
-# Options are All (true), None (false), or explicit list
-_T = TypeVar('_T')
-EntityList = Union[bool, List[_T]]
 
 class OrderDirection(Enum):
     Asc = 0
@@ -22,6 +19,7 @@ class ChannelOptions:
     postsBeforeTime: Optional[Time] = None
     postsAfterTime: Optional[Time] = None
     postLimit: int = -1 # 0 is allowed and fetches only channel metadata
+    postSessionLimit: int = -1 # 0 is allowed and fetches only channel metadata
     redownload: bool = False
     downloadTimeDirection: OrderDirection = OrderDirection.Asc
     downloadAttachments: bool = False
@@ -45,6 +43,7 @@ class ChannelOptions:
             self.postsAfterTime = Time(x)
 
         self.postLimit = info.get('maximumPostCount', self.postLimit)
+        self.postSessionLimit = info.get('sessionPostLimit', self.postSessionLimit)
         self.redownload = info.get('redownload', self.redownload)
         x = info.get('downloadFromOldest', None)
         if x is not None:
@@ -90,27 +89,30 @@ class GroupChannelSpec:
         self.opts = dataclasses.replace(defaultOpts)
         self.opts.update(info)
 
-@dataclass(init=False)
+@dataclass
 class TeamSpec:
     locator: EntityLocator
-    privateChannels: EntityList[ChannelSpec] = True
-    publicChannels: EntityList[ChannelSpec] = True
+    miscPrivateChannels: bool = True
+    explicitPrivateChannels: List[ChannelSpec] = dataclasses.field(default_factory=list)
     privateChannelDefaults: ChannelOptions = ChannelOptions()
+    miscPublicChannels: bool = True
+    explicitPublicChannels: List[ChannelSpec] = dataclasses.field(default_factory=list)
     publicChannelDefaults: ChannelOptions = ChannelOptions()
 
-    def __init__(self, info: dict, globalPrivateDefaults: ChannelOptions, globalPublicDefaults: ChannelOptions):
-        self.locator = EntityLocator(info['team'])
+    @staticmethod
+    def fromConfig(info: dict, globalPrivateDefaults: ChannelOptions, globalPublicDefaults: ChannelOptions) -> 'TeamSpec':
+        self = TeamSpec(locator=EntityLocator(info['team']))
 
         if 'defaultChannelOptions' in info:
             channelDefaults = ChannelOptions(info['defaultChannelOptions'])
         else:
             channelDefaults = None
         if 'privateChannelOptions' in info:
-            self.privateChannelOptions = ChannelOptions(info['privateChannelOptions'])
+            self.privateChannelDefaults = ChannelOptions(info['privateChannelOptions'])
         elif channelDefaults:
-            self.privateChannelOptions = channelDefaults
+            self.privateChannelDefaults = channelDefaults
         else:
-            self.privateChannelOptions = globalPrivateDefaults
+            self.privateChannelDefaults = globalPrivateDefaults
         if 'publicChannelOptions' in info:
             self.publicChannelDefaults = ChannelOptions(info['publicChannelOptions'])
         elif channelDefaults:
@@ -118,16 +120,18 @@ class TeamSpec:
         else:
             self.publicChannelDefaults = globalPublicDefaults
 
+        if 'downloadPrivateChannels' in info:
+            self.miscPrivateChannels = bool(info['downloadPrivateChannels'])
         if 'privateChannels' in info:
-            if len(info['privateChannels']) == 0:
-                self.privateChannels = False
-            else:
-                self.privateChannels = [ChannelSpec(chan, self.privateChannelDefaults) for chan in info['privateChannels']]
+            assert isinstance(info['privateChannels'], list)
+            self.explicitPrivateChannels = [ChannelSpec(chan, self.privateChannelDefaults) for chan in info['privateChannels']]
+        if 'downloadPublicChannels' in info:
+            self.miscPublicChannels = bool(info['downloadPublicChannels'])
         if 'publicChannels' in info:
-            if len(info['publicChannels']) == 0:
-                self.publicChannels = False
-            else:
-                self.publicChannels = [ChannelSpec(chan, self.publicChannelDefaults) for chan in info['publicChannels']]
+            assert isinstance(info['publicChannels'], list)
+            self.explicitPublicChannels = [ChannelSpec(chan, self.publicChannelDefaults) for chan in info['publicChannels']]
+
+        return self
 
 @dataclass
 class ConfigFile:
@@ -137,9 +141,12 @@ class ConfigFile:
     token: str = ''
 
     throttlingLoopDelay: int = 0
-    teams: EntityList[TeamSpec] = True
-    users: EntityList[ChannelSpec] = True
-    groups: EntityList[GroupChannelSpec] = True
+    miscTeams: bool = True
+    explicitTeams: List[TeamSpec] = dataclasses.field(default_factory=list)
+    miscUserChannels: bool = True
+    explicitUsers: List[ChannelSpec] = dataclasses.field(default_factory=list)
+    miscGroupChannels: bool = True
+    explicitGroups: List[GroupChannelSpec] = dataclasses.field(default_factory=list)
     channelDefaults: ChannelOptions = ChannelOptions()
     directChannelDefaults: ChannelOptions = ChannelOptions()
     groupChannelDefaults: ChannelOptions = ChannelOptions()
@@ -160,10 +167,17 @@ def readConfig(filename: str) -> ConfigFile:
         config = json.load(f)
         res = ConfigFile()
 
-        res.hostname = config['hostname']
-        res.username = config['username']
-        res.password = config.get('password', os.environ.get('MATTERMOST_PASSWORD', ''))
-        res.token = config.get('token', os.environ.get('MATTERMOST_TOKEN', ''))
+        assert 'connection' in config
+        connection = config['connection']
+        res.hostname = connection['hostname']
+        res.username = connection.get('username', '')
+        if res.username == '':
+            res.username = os.environ.get('MATTERMOST_USER', '')
+            if res.username == '':
+                logging.error(f'Field connection.username is missing in configuration.')
+                raise ValueError
+        res.password = connection.get('password', os.environ.get('MATTERMOST_PASSWORD', ''))
+        res.token = connection.get('token', os.environ.get('MATTERMOST_TOKEN', ''))
 
         if 'throttling' in config:
             res.throttlingLoopDelay = config['throttling']['loopDelay']
@@ -171,8 +185,6 @@ def readConfig(filename: str) -> ConfigFile:
             output = config['output']
             if 'directory' in output:
                 res.outputDirectory = Path(output['directory'])
-            # if 'standalonePosts' in output:
-            #     res.verboseStandalonePosts = output['standalonePosts']
             if 'humanFriendlyPosts' in output:
                 res.verboseHumanFriendlyPosts = output['humanFriendlyPosts']
 
@@ -209,31 +221,32 @@ def readConfig(filename: str) -> ConfigFile:
         else:
             res.publicChannelDefaults = res.channelDefaults
 
+        if 'downloadTeams' in config:
+            res.miscTeams = bool(config['downloadTeams'])
         if 'teams' in config:
             assert isinstance(config['teams'], list)
-            if len(config['teams']) == 0:
-                res.teams = False
-            else:
-                res.teams = [
-                    TeamSpec(teamDict, res.groupChannelDefaults, res.publicChannelDefaults)
-                    for teamDict in config['teams']
-                ]
+            res.explicitTeams = [
+                TeamSpec.fromConfig(teamDict, res.groupChannelDefaults, res.publicChannelDefaults)
+                for teamDict in config['teams']
+            ]
+        if 'downloadUserChannels' in config:
+            res.miscUserChannels = bool(config['downloadUserChannels'])
         if 'users' in config:
             assert isinstance(config['users'], list)
-            if len(config['users']) == 0:
-                res.users = False
-            else:
-                res.users = [
-                    ChannelSpec(userChannel, res.directChannelDefaults)
-                    for userChannel in config['users']
-                ]
+            res.explicitUsers = [
+                ChannelSpec(userChannel, res.directChannelDefaults)
+                for userChannel in config['users']
+            ]
+        if 'downloadGroupChannels' in config:
+            res.miscGroupChannels = bool(config['downloadGroupChannels'])
         if 'groups' in config:
-            if len(config['groups']) == 0:
-                res.groups = False
-            else:
-                res.groups = [GroupChannelSpec(chan, res.groupChannelDefaults) for chan in config['groups']]
+            assert isinstance(config['groups'], list)
+            res.explicitGroups = [
+                GroupChannelSpec(chan, res.groupChannelDefaults)
+                for chan in config['groups']
+            ]
 
-        if 'downloadAllEmojis' in config and config['downloadAllEmojis']:
+        if 'downloadEmojis' in config and config['downloadEmojis']:
             res.downloadAllEmojis = True
 
     return res

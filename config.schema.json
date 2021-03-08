@@ -1,10 +1,5 @@
 {
   "$schema": "http://json-schema.org/schema",
-  "required": [
-    "hostname",
-    "usedApi",
-    "username"
-  ],
   "definitions": {
     "timepoint": {
       "description": "Definition of point in time",
@@ -85,6 +80,11 @@
           "type": "boolean"
         },
         "maximumPostCount": {
+          "description": "There cannot be more than this amount of posts in the storage. Good as sanity check on large channels for bulk download. Unlimited if -1 or default.",
+          "type": "integer",
+          "minimum": -1
+        },
+        "sessionPostLimit": {
           "description": "Download only up to given number of posts in one session. Unlimited if -1 or default.",
           "type": "integer",
           "minimum": -1
@@ -135,26 +135,44 @@
       }
     }
   },
+  "required": [
+    "connection"
+  ],
   "properties": {
     "$schema": {
       "type": "string"
     },
-    "hostname": {
-      "description": "Mattermost server url used as prefix to api calls.",
-      "type": "string"
+    "connection": {
+      "description": "Contains all needed to set up a connection with the server.",
+      "type": "object",
+      "required": [
+        "hostname",
+        "usedApi",
+        "username"
+      ],
+      "properties": {
+        "hostname": {
+          "description": "Mattermost server url used as prefix to api calls.",
+          "type": "string"
+        },
+        "usedApi": {
+          "type": "number",
+          "const": 4
+        },
+        "username": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        }
+      }
     },
-    "usedApi": {
-      "type": "number",
-      "const": 4
-    },
-    "username": {
-      "type": "string"
-    },
-    "password": {
-      "type": "string"
-    },
-    "token": {
-      "type": "string"
+    "downloadTeams": {
+      "description": "Should download team-based channels? (Ones explicitly specified in `teams` are treated separately)",
+      "type": "boolean"
     },
     "teams": {
       "type": "array",
@@ -168,6 +186,10 @@
         "properties": {
           "team": {
             "$ref": "#/definitions/entityLocator"
+          },
+          "downloadPublicChannels": {
+            "description": "Should download public channels (yes by default)? Ones explicitly specified in `publicChannels` are treated separately.",
+            "type": "boolean"
           },
           "publicChannels": {
             "description": "Public (open) channels to save (all if ommited).",
@@ -184,8 +206,12 @@
               ]
             }
           },
+          "downloadPrivateChannels": {
+            "description": "Should download private channels (yes by default)? Ones explicitly specified in `privateChannels` are treated separately.",
+            "type": "boolean"
+          },
           "privateChannels": {
-            "description": "Private channels to save (all if ommited).",
+            "description": "Private channels to save.",
             "type": "array",
             "items": {
               "allOf": [
@@ -211,8 +237,12 @@
         }
       }
     },
+    "downloadUserChannels": {
+      "description": "Should download direct user to user channels (yes by default)? Ones explicitly specified in `users` are treated separately.",
+      "type": "boolean"
+    },
     "users": {
-      "description": "List of users we want to save private conversations with (all if ommited)",
+      "description": "List of users we want to save private conversations with.",
       "type": "array",
       "items": {
         "allOf": [
@@ -226,8 +256,12 @@
         ]
       }
     },
+    "downloadGroupChannels": {
+      "description": "Should download group channels (yes by default)? Ones explicitly specified in `users` are treated separately.",
+      "type": "boolean"
+    },
     "groups": {
-      "description": "List of groups we want to save conversations with (all if ommited).",
+      "description": "List of groups we want to save conversations with.",
       "type": "array",
       "items": {
         "description": "Group channel selector. Specify by id or list of users.",
@@ -257,6 +291,10 @@
           }
         ]
       }
+    },
+    "downloadEmojis": {
+      "description": "Whether to download all custom emojis available, regardless of origin. To download only emojis used in posts being downloaded, use per-channel option.",
+      "type": "boolean"
     },
     "defaultChannelOptions": {
       "$ref": "#/definitions/channelPostOptions"
@@ -310,10 +348,6 @@
           "type": ["boolean", "null"]
         }
       }
-    },
-    "downloadAllEmojis": {
-      "description": "Whether to download all custom emojis avaiable, regardless of origin.",
-      "type": "boolean"
     }
   }
 }

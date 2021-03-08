@@ -4,7 +4,7 @@
 
 from bo import *
 from common import *
-from config import ChannelOptions, ChannelSpec, ConfigFile, GroupChannelSpec, OrderDirection
+from config import ChannelOptions, ChannelSpec, ConfigFile, GroupChannelSpec, OrderDirection, TeamSpec
 from driver import MattermostDriver
 import progress
 from store import ChannelHeader, PostOrdering, PostStorage
@@ -64,9 +64,7 @@ class Saver:
     def getWantedUsers(self) -> List[Tuple[User, ChannelOptions]]:
         userIds = set()
         res = []
-        if not isinstance(self.configfile.users, list):
-            return res
-        for userSpec in self.configfile.users:
+        for userSpec in self.configfile.explicitUsers:
             u = self.getUserByLocator(userSpec.locator)
             if u.id in userIds:
                 logging.warning(f"Explicitly requesting direct messages for user {u.name} more than once.")
@@ -76,103 +74,99 @@ class Saver:
         return res
 
     def getWantedGlobalChannels(self) -> Tuple[Dict[User, ChannelRequest], Set[ChannelRequest]]:
+        '''
+            Collects a list of channels requested by configfile that aren't scoped under Team.
+            Returns pair representing channel requests for users and groups respectively.
+        '''
         wantedDirectChannels: Dict[User, ChannelRequest] = {}
         wantedGroupChannels: Set[ChannelRequest] = set()
-        directChannelNames = {self.driver.getDirectChannelNameByUserId(u.id): (u, opts) for u, opts in self.getWantedUsers()}
+        explicitDirectChannelNames = {self.driver.getDirectChannelNameByUserId(u.id): (u, opts) for u, opts in self.getWantedUsers()}
         matchedGroupChannels: Set[GroupChannelSpec] = set()
         for team in self.driver.getTeams().values():
             for channel in team.channels.values():
-                if channel.type == ChannelType.Direct and (self.configfile.users is True or channel.internalName in directChannelNames):
+                if channel.type == ChannelType.Direct:
+                    # If we don't have this channel already
                     if channel.id not in (ch.metadata.id for ch in wantedDirectChannels.values()):
-                        if self.configfile.users is True:
+                        if channel.internalName in explicitDirectChannelNames:
+                            u, opts = explicitDirectChannelNames[channel.internalName]
+                            wantedDirectChannels.update({u: ChannelRequest(config=opts, metadata=channel)})
+                            del explicitDirectChannelNames[channel.internalName]
+                        elif self.configfile.miscUserChannels:
                             otherUser = self.driver.getUserById(self.driver.getUserIdFromDirectChannelName(channel.internalName))
                             wantedDirectChannels.update({otherUser: ChannelRequest(config=self.configfile.directChannelDefaults, metadata=channel)})
-                        elif self.configfile.users is False:
-                            pass
-                        else:
-                            u, opts = directChannelNames[channel.internalName]
-                            wantedDirectChannels.update({u: ChannelRequest(config=opts, metadata=channel)})
-                            del directChannelNames[channel.internalName]
-                elif channel.type == ChannelType.Group and self.configfile.groups is not False:
-                    if self.configfile.groups is True:
-                        wantedGroupChannels.add(ChannelRequest(config=self.configfile.groupChannelDefaults, metadata=channel))
+                elif channel.type == ChannelType.Group:
+                    for wch in self.configfile.explicitGroups:
+                        if self.matchGroupChannel(channel, wch.locator):
+                            wantedGroupChannels.add(ChannelRequest(config=wch.opts, metadata=channel))
+                            matchedGroupChannels.add(wch)
+                            break
                     else:
-                        assert isinstance(self.configfile.groups, list)
-                        for wch in self.configfile.groups:
-                            if self.matchGroupChannel(channel, wch.locator):
-                                wantedGroupChannels.add(ChannelRequest(config=wch.opts, metadata=channel))
-                                matchedGroupChannels.add(wch)
-                                break
+                        if self.configfile.miscGroupChannels:
+                            wantedGroupChannels.add(ChannelRequest(config=self.configfile.groupChannelDefaults, metadata=channel))
 
         # Have not found all channels?
-        for user, _ in directChannelNames.values():
+        for user, _ in explicitDirectChannelNames.values():
             logging.warning(f'Found no direct channel with {user.name}.')
-        if isinstance(self.configfile.groups, list):
-            for wch in self.configfile.groups:
-                if wch not in matchedGroupChannels:
-                    logging.warning(f'Found no group channel via locator {wch.locator}.')
+        for wch in self.configfile.explicitGroups:
+            if wch not in matchedGroupChannels:
+                logging.warning(f'Found no group channel via locator {wch.locator}.')
         return wantedDirectChannels, wantedGroupChannels
 
     def getWantedPerTeamChannels(self) -> Dict[Team, List[ChannelRequest]]:
-        if self.configfile.teams is False:
+        if self.configfile.miscTeams is False and len(self.configfile.explicitTeams) == 0:
             return {}
 
         res: Dict[Team, List[ChannelRequest]] = {}
         teams = self.driver.getTeams()
 
-        def getChannelsForTeam(team: Team, wantedChannels: Iterable[ChannelSpec]) -> List[ChannelRequest]:
+        def getChannelsForTeam(team: Team, wantedTeam: TeamSpec) -> List[ChannelRequest]:
             channels = []
-            for wch in wantedChannels:
-                for ch in team.channels.values():
-                    if ch.type in (ChannelType.Open, ChannelType.Private) and ch.match(wch.locator):
-                        channels.append(ChannelRequest(config=wch.opts, metadata=ch))
-                        break
-                else:
-                    logging.warning(f'Found no requested channel on team {team.internalName} ({team.name}) via locator {wch.locator}.')
+            explicitPublicLocators = {ch.locator for ch in wantedTeam.explicitPublicChannels}
+            explicitPrivateLocators = {ch.locator for ch in wantedTeam.explicitPrivateChannels}
+
+            for availableChannel in team.channels.values():
+                if availableChannel.type == ChannelType.Open:
+                    for wch in wantedTeam.explicitPublicChannels:
+                        if availableChannel.match(wch.locator):
+                            channels.append(ChannelRequest(config=wch.opts, metadata=availableChannel))
+                            explicitPublicLocators.remove(wch.locator)
+                            break
+                    else:
+                        if wantedTeam.miscPublicChannels:
+                            channels.append(ChannelRequest(config=wantedTeam.publicChannelDefaults, metadata=availableChannel))
+                elif availableChannel.type == ChannelType.Private:
+                    for wch in wantedTeam.explicitPrivateChannels:
+                        if availableChannel.match(wch.locator):
+                            channels.append(ChannelRequest(config=wch.opts, metadata=availableChannel))
+                            explicitPrivateLocators.remove(wch.locator)
+                            break
+                    else:
+                        if wantedTeam.miscPrivateChannels:
+                            channels.append(ChannelRequest(config=wantedTeam.privateChannelDefaults, metadata=availableChannel))
+            for loc in explicitPublicLocators:
+                logging.warning(f'Found no requested public channel on team {team.internalName} ({team.name}) via locator {loc}.')
+            for loc in explicitPrivateLocators:
+                logging.warning(f'Found no requested private channel on team {team.internalName} ({team.name}) via locator {loc}.')
             return channels
 
-        if self.configfile.teams is True:
-            for t in teams.values():
-                channels = []
-                for ch in t.channels.values():
-                    if ch.type == ChannelType.Open:
-                        channels.append(ChannelRequest(config=self.configfile.publicChannelDefaults, metadata=ch))
-                    elif ch.type == ChannelType.Private:
-                        channels.append(ChannelRequest(config=self.configfile.privateChannelDefaults, metadata=ch))
-                res[t] = channels
-            return res
-
-        assert isinstance(self.configfile.teams, list)
-        for wantedTeam in self.configfile.teams:
-            for availableTeam in teams.values():
+        explicitTeamLocators: Set[EntityLocator] = {t.locator for t in self.configfile.explicitTeams}
+        for availableTeam in teams.values():
+            for wantedTeam in self.configfile.explicitTeams:
                 if availableTeam.match(wantedTeam.locator):
-                    publicChannels, privateChannels = [], []
-
-                    if wantedTeam.publicChannels is True:
-                        publicChannels = [ChannelRequest(config=wantedTeam.publicChannelDefaults, metadata=ch)
-                            for ch in availableTeam.channels.values()
-                                if ch.type == ChannelType.Open
-                        ]
-                    elif wantedTeam.publicChannels is False:
-                        pass
-                    else:
-                        assert isinstance(wantedTeam.publicChannels, list)
-                        publicChannels = getChannelsForTeam(availableTeam, wantedTeam.publicChannels)
-                    if wantedTeam.privateChannels is True:
-                        privateChannels = [ChannelRequest(config=wantedTeam.privateChannelDefaults, metadata=ch)
-                            for ch in availableTeam.channels.values()
-                                if ch.type == ChannelType.Private
-                        ]
-                    elif wantedTeam.privateChannels is False:
-                        pass
-                    else:
-                        assert isinstance(wantedTeam.privateChannels, list)
-                        privateChannels = getChannelsForTeam(availableTeam, wantedTeam.privateChannels)
-
-                    res[availableTeam] = publicChannels + privateChannels
+                    res[availableTeam] = getChannelsForTeam(availableTeam, wantedTeam)
+                    explicitTeamLocators.remove(wantedTeam.locator)
                     break
             else:
-                logging.error(f'Team requested by {wantedTeam.locator} was not found!')
+                if self.configfile.miscTeams:
+                    channels = []
+                    for ch in availableTeam.channels.values():
+                        if ch.type == ChannelType.Open:
+                            channels.append(ChannelRequest(config=self.configfile.publicChannelDefaults, metadata=ch))
+                        elif ch.type == ChannelType.Private:
+                            channels.append(ChannelRequest(config=self.configfile.privateChannelDefaults, metadata=ch))
+                    res[availableTeam] = channels
+        for loc in explicitTeamLocators:
+            logging.error(f'Team requested by {loc} was not found!')
         return res
 
     def storeFile(self, url: str, filename: str, directoryName: Path, suffix: Optional[str] = None, redownload: bool = False) -> str:
@@ -328,6 +322,8 @@ class Saver:
             @returns either
                 - None if no download is necessary
                 - pair of updated ChannelOptions and trimArchive flag
+
+            TODO: in case of trimming, shouldn't return ChannelOptions => should return DoNothing, TrimArchive, ChannelOptions
         '''
 
         options = copy(channelOptions)
@@ -422,14 +418,20 @@ class Saver:
             'timeDirection': options.downloadTimeDirection
         }
 
-        if options.postLimit > 0:
-            params.update(maxCount=options.postLimit)
+        if options.postLimit > 0 or options.postSessionLimit > 0:
+            params.update(maxCount=min(max(options.postLimit,0), max(options.postSessionLimit, 0)))
 
         emptyArchive = archiveHeader is None or archiveHeader.storage is None
         truncateArchive = options.redownload
 
         if not (emptyArchive or truncateArchive):
             assert archiveHeader.storage is not None
+
+            if options.postLimit > 0:
+                if archiveHeader.storage.count >= options.postLimit:
+                    return None
+                else:
+                    params['maxCount'] = min(params['maxCount'], options.postLimit - archiveHeader.storage.count)
 
             newOrganization = PostOrdering.AscendingContinuous if options.downloadTimeDirection == OrderDirection.Asc else PostOrdering.DescendingContinuous
             if newOrganization != archiveHeader.storage.organization:
@@ -477,20 +479,21 @@ class Saver:
                     excInfo = sys.exc_info()
                     assert excInfo is not None
                     tbText = ''.join(traceback.format_tb(excInfo[2]))
-                    logging.warning(f"Unable to load previously saved metadata for channel {channel.internalName}, generating from scratch.\nReason: {err}\nTraceback:\n{tbText}")
+                    reasonText = '' if len(str(err)) == 0 else f'Reason: {err}\n'
+                    logging.warning(f"Unable to load previously saved metadata for channel {channel.internalName}, generating from scratch.\n{reasonText}Traceback:\n{tbText}")
                     del excInfo
 
                 # We delete header before we start downloading to ensure header content is consistent if download gets interrupted
                 headerFile.seek(0)
                 headerFile.truncate()
 
-            if options.postLimit != 0:
+            if options.postLimit != 0 and options.postSessionLimit != 0:
                 # Used for display
-                estimatedPostLimit: int
+                estimatedPostLimit: int = channel.messageCount
                 if options.postLimit != -1:
-                    estimatedPostLimit = min(channel.messageCount, options.postLimit)
-                else:
-                    estimatedPostLimit = channel.messageCount
+                    estimatedPostLimit = min(estimatedPostLimit, options.postLimit)
+                if options.postSessionLimit != -1:
+                    estimatedPostLimit = min(estimatedPostLimit, options.postSessionLimit)
 
                 header.storage = PostStorage.empty()
                 if options.downloadTimeDirection == OrderDirection.Asc:
