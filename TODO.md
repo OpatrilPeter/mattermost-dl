@@ -10,6 +10,7 @@
 
 ### feat
 - safety mode - do not trim archive without confirmation (redownload or interactive ask) - if trim is needed channel download fails
-- more info messages, better formatting
+- more info messages
   - downloading messages that are skipped on filter conditions moves progress
   - gentler recovery/more informative error handling
+  - json schema validator

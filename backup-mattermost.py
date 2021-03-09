@@ -22,7 +22,7 @@ def setupLogging(conffile: ConfigFile):
     if conffile.verboseMode:
         args.update({
             'level': logging.DEBUG,
-            'format': '%(asctime)s:%(levelname)s:%(name)s: %(message)s'
+            'format': '%(asctime)s:%(levelname)s:%(name)s:%(filename)s:%(lineno)s: %(message)s'
         })
     else:
         args.update({

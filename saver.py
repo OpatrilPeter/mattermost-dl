@@ -408,7 +408,9 @@ class Saver:
 
             return options, False
 
-    def getChannelDownloaderParams(self, options: ChannelOptions, archiveHeader: Optional[ChannelHeader]) -> Union[None, Tuple[bool, Dict[str, Any]]]:
+    def getChannelDownloaderParams(self, options: ChannelOptions, archiveHeader: Optional[ChannelHeader],
+            lastChannelMessageTime: Optional[Time]
+        ) -> Union[None, Tuple[bool, Dict[str, Any]]]:
         '''
             Returns params suitable for MattermostDriver's post downloading
             and indicator whether current archive content is suitable for appending.
@@ -443,6 +445,11 @@ class Saver:
                 options, truncateArchiveTmp = optionsPack
                 if truncateArchiveTmp:
                     truncateArchive = True
+
+            if not truncateArchive and lastChannelMessageTime is not None:
+                if archiveHeader.storage.organization in (PostOrdering.Ascending, PostOrdering.AscendingContinuous):
+                    if archiveHeader.storage.endTime >= lastChannelMessageTime: # type: ignore
+                        return None
 
         # Handling of empty (or about-to-be-truncated) archive
         if options.postsAfterId:
@@ -483,83 +490,90 @@ class Saver:
                     logging.warning(f"Unable to load previously saved metadata for channel {channel.internalName}, generating from scratch.\n{reasonText}Traceback:\n{tbText}")
                     del excInfo
 
+            if options.postLimit == 0 or options.postSessionLimit == 0:
+                return # Early exit - nothing downloaded, no need to touch header
+
+            # Used for display
+            estimatedPostLimit: int = channel.messageCount
+            if options.postLimit != -1:
+                estimatedPostLimit = min(estimatedPostLimit, options.postLimit)
+            if options.postSessionLimit != -1:
+                estimatedPostLimit = min(estimatedPostLimit, options.postSessionLimit)
+
+            header.storage = PostStorage.empty()
+            if options.downloadTimeDirection == OrderDirection.Asc:
+                header.storage.organization = PostOrdering.AscendingContinuous
+            else:
+                assert options.downloadTimeDirection == OrderDirection.Desc
+                header.storage.organization = PostOrdering.DescendingContinuous
+
+            paramPack = self.getChannelDownloaderParams(options=options, archiveHeader=archiveHeader,
+                lastChannelMessageTime=channel.lastMessageTime
+            )
+            if paramPack is None:
+                return # Early exit - we didn't download anyting, no need to touch header
+            truncateDataTmp, params = paramPack
+            if truncateDataTmp:
+                truncateData = True
+
+            if headerExists:
                 # We delete header before we start downloading to ensure header content is consistent if download gets interrupted
                 headerFile.seek(0)
                 headerFile.truncate()
 
-            if options.postLimit != 0 and options.postSessionLimit != 0:
-                # Used for display
-                estimatedPostLimit: int = channel.messageCount
-                if options.postLimit != -1:
-                    estimatedPostLimit = min(estimatedPostLimit, options.postLimit)
-                if options.postSessionLimit != -1:
-                    estimatedPostLimit = min(estimatedPostLimit, options.postSessionLimit)
+                if truncateData and archiveHeader is not None:
+                    # We're dropping old archive, so we can drop old header, too
+                    archiveHeader = None
 
-                header.storage = PostStorage.empty()
-                if options.downloadTimeDirection == OrderDirection.Asc:
-                    header.storage.organization = PostOrdering.AscendingContinuous
+            with open(postsFilename, 'w' if truncateData else 'a+') as output:
+                if self.showProgressReport():
+                    progressReporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
+                        contentPadding=10, contentAlignLeft=False,
+                        header='Progress: ', footer=f'/{estimatedPostLimit} posts (upper limit approximate)')
+                    progressReporter.open()
+                    progressReporter.update(f'0')
                 else:
-                    assert options.downloadTimeDirection == OrderDirection.Desc
-                    header.storage.organization = PostOrdering.DescendingContinuous
+                    progressReporter = None
 
-                paramPack = self.getChannelDownloaderParams(options=options, archiveHeader=archiveHeader)
-                if paramPack is not None:
-                    truncateDataTmp, params = paramPack
-                    if truncateDataTmp:
-                        truncateData = True
-                    if truncateData and archiveHeader is not None:
-                        # We're dropping old archive, so we can drop old header, too
-                        archiveHeader = None
+                takeEmojis: bool = options.emojiMetadata or options.downloadEmoji
 
-                    with open(postsFilename, 'w' if truncateData else 'a+') as output:
-                        if self.showProgressReport():
-                            progressReporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
-                                contentPadding=10, contentAlignLeft=False,
-                                header='Progress: ', footer=f'/{estimatedPostLimit} posts (upper limit approximate)')
-                            progressReporter.open()
-                            progressReporter.update(f'0')
+                def perPost(p: Post, hints: MattermostDriver.PostHints):
+                    header.usedUsers.add(self.driver.getUserById(p.userId))
+                    if options.downloadAttachments:
+                        for attachment in p.attachments:
+                            attachments.append(attachment)
+                    self.enrichPost(p)
+                    if p.emojis:
+                        if takeEmojis:
+                            for emoji in p.emojis:
+                                assert isinstance(emoji, Emoji)
+                                header.usedEmojis.add(emoji)
+                            p.emojis = [cast(Emoji, emoji).id for emoji in p.emojis]
                         else:
-                            progressReporter = None
+                            p.emojis = []
+                    self.jsonDumpToFile(p.toStore(), output)
+                    output.write('\n')
 
-                        takeEmojis: bool = options.emojiMetadata or options.downloadEmoji
+                    if header.storage.count == 0:
+                        header.storage.firstPostId = p.id
+                        if options.downloadTimeDirection == OrderDirection.Asc:
+                            header.storage.beginTime = p.createTime if options.postsAfterTime is None else min(p.createTime, options.postsAfterTime)
+                        else:
+                            header.storage.beginTime = p.createTime if options.postsBeforeTime is None else max(p.createTime, options.postsBeforeTime)
+                        header.storage.postIdBeforeFirst = hints.postIdBefore if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdAfter
+                    header.storage.lastPostId = p.id
+                    header.storage.endTime = p.createTime
+                    header.storage.postIdAfterLast = hints.postIdAfter if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdBefore
 
-                        def perPost(p: Post, hints: MattermostDriver.PostHints):
-                            header.usedUsers.add(self.driver.getUserById(p.userId))
-                            if options.downloadAttachments:
-                                for attachment in p.attachments:
-                                    attachments.append(attachment)
-                            self.enrichPost(p)
-                            if p.emojis:
-                                if takeEmojis:
-                                    for emoji in p.emojis:
-                                        assert isinstance(emoji, Emoji)
-                                        header.usedEmojis.add(emoji)
-                                    p.emojis = [cast(Emoji, emoji).id for emoji in p.emojis]
-                                else:
-                                    p.emojis = []
-                            self.jsonDumpToFile(p.toStore(), output)
-                            output.write('\n')
+                    header.storage.count += 1
+                    if self.showProgressReport():
+                        progressReporter.update(str(header.storage.count))
 
-                            if header.storage.count == 0:
-                                header.storage.firstPostId = p.id
-                                if options.downloadTimeDirection == OrderDirection.Asc:
-                                    header.storage.beginTime = p.createTime if options.postsAfterTime is None else min(p.createTime, options.postsAfterTime)
-                                else:
-                                    header.storage.beginTime = p.createTime if options.postsBeforeTime is None else max(p.createTime, options.postsBeforeTime)
-                                header.storage.postIdBeforeFirst = hints.postIdBefore if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdAfter
-                            header.storage.lastPostId = p.id
-                            header.storage.endTime = p.createTime
-                            header.storage.postIdAfterLast = hints.postIdAfter if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdBefore
+                self.driver.processPosts(processor=perPost, channel=channel, **params)
 
-                            header.storage.count += 1
-                            if self.showProgressReport():
-                                progressReporter.update(str(header.storage.count))
-
-                        self.driver.processPosts(processor=perPost, channel=channel, **params)
-
-                        if self.showProgressReport():
-                            progressReporter.close()
-                        logging.info('Processed all posts.')
+                if self.showProgressReport():
+                    progressReporter.close()
+                logging.info('Processed all posts.')
 
             if options.emojiMetadata:
                 for emoji in header.usedEmojis:
@@ -626,26 +640,33 @@ class Saver:
             self.configfile.outputDirectory.mkdir()
         m = self.driver
 
+        logging.info(f'Logging in as {self.configfile.username}.')
         if self.configfile.token == '':
             m.login()
         self.user = m.loadLocalUser()
 
+        logging.info('Collecting metadata about available teams ...')
         teams = m.getTeams()
         if len(teams) == 0:
             logging.fatal(f'User {self.configfile.username} is not member of any teams!')
             return
 
+        logging.info('Collecting metadata about available channels ...')
         for team in teams.values():
             m.loadChannels(teamId=team.id)
 
         if self.configfile.downloadAllEmojis:
+            logging.info('Downloading emoji database ...')
             emojis = self.driver.getEmojiList()
             for emoji in emojis:
                 self.enrichEmoji(emoji)
             self.processEmoji('emojis', emojis)
 
+        logging.info('Selecting channels to download ...')
         directChannels, groupChannels = self.getWantedGlobalChannels()
         teamChannels = self.getWantedPerTeamChannels()
+
+        logging.info('Processing channels ...')
         for user, channel in directChannels.items():
             self.processDirectChannel(user, channel)
         for channel in groupChannels:
@@ -654,3 +675,4 @@ class Saver:
             for channel in perTeamChannels:
                 self.processTeamChannel(team, channel)
 
+        logging.info('Download process completed succesfuly.')
