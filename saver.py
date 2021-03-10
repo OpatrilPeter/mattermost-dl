@@ -421,7 +421,12 @@ class Saver:
         }
 
         if options.postLimit > 0 or options.postSessionLimit > 0:
-            params.update(maxCount=min(max(options.postLimit,0), max(options.postSessionLimit, 0)))
+            if options.postLimit == -1:
+                params.update(maxCount=options.postSessionLimit)
+            elif options.postSessionLimit == -1:
+                params.update(maxCount=options.postLimit)
+            else:
+                params.update(maxCount=min(options.postLimit, options.postSessionLimit))
 
         emptyArchive = archiveHeader is None or archiveHeader.storage is None
         truncateArchive = options.redownload
