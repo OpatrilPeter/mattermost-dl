@@ -477,7 +477,7 @@ class Saver:
         archiveHeader: Optional[ChannelHeader] = None
         truncateData: bool = True
 
-        with open(headerFilename, 'r+' if headerExists else 'w') as headerFile:
+        with open(headerFilename, 'r+' if headerExists else 'w', encoding='utf8') as headerFile:
             if headerExists:
                 try:
                     archiveHeader = ChannelHeader.fromStore(json.load(headerFile))
@@ -525,7 +525,7 @@ class Saver:
                     # We're dropping old archive, so we can drop old header, too
                     archiveHeader = None
 
-            with open(postsFilename, 'w' if truncateData else 'a+') as output:
+            with open(postsFilename, 'w' if truncateData else 'a+', encoding='utf8') as output:
                 if self.showProgressReport():
                     progressReporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
                         contentPadding=10, contentAlignLeft=False,

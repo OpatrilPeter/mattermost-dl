@@ -26,7 +26,9 @@ class ProgressReporter:
         self.footer: str = footer
 
         if not settings.forceMode:
-            if not self.io.isatty():
+            # Outside terminal we use simple basic progress reporting.
+            # Windows still use `cmd` be default, which doesn't support escape codes
+            if not self.io.isatty() or sys.platform.startswith('win'):
                 self.settings.mode = VisualizationMode.DumbTerminal
     def open(self):
         if self.settings.mode == VisualizationMode.AnsiEscapes:
