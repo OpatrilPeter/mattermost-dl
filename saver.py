@@ -218,7 +218,7 @@ class Saver:
         if self.showProgressReport():
             reporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
                 header='Progress: ', footer=f'/{len(entities)} {entitiesName} (upper limit approximate)',
-                contentPadding=6, contentAlignLeft=False)
+                contentPadding=6, contentAlignLeft=False, updateIntervalMs=self.configfile.progressInterval)
             reporter.open()
             reporter.update('0')
         else:
@@ -529,7 +529,8 @@ class Saver:
                 if self.showProgressReport():
                     progressReporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
                         contentPadding=10, contentAlignLeft=False,
-                        header='Progress: ', footer=f'/{estimatedPostLimit} posts (upper limit approximate)')
+                        header='Progress: ', footer=f'/{estimatedPostLimit} posts (upper limit approximate)',
+                        updateIntervalMs=self.configfile.progressInterval)
                     progressReporter.open()
                     progressReporter.update(f'0')
                 else:

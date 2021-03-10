@@ -6,6 +6,7 @@
 from common import *
 
 from copy import copy
+from time import monotonic_ns as clock
 
 class VisualizationMode(Enum):
     DumbTerminal = 0
@@ -17,13 +18,17 @@ class ProgressSettings:
     forceMode: bool = False
 
 class ProgressReporter:
-    def __init__(self, io: TextIO, settings: ProgressSettings = ProgressSettings(), header: str = '', footer: str = '', contentPadding: int = 0, contentAlignLeft: bool = True):
+    def __init__(self, io: TextIO, settings: ProgressSettings = ProgressSettings(), header: str = '', footer: str = '',
+            contentPadding: int = 0, contentAlignLeft: bool = True, updateIntervalMs: int = 500):
         self.io: TextIO = io
         self.settings: ProgressSettings = copy(settings)
         self.header: str = header
         self.contentPadding: int = contentPadding
         self.contentAlignLeft: bool = contentAlignLeft
         self.footer: str = footer
+        self.updateIntervalNs: int = 1000000 * updateIntervalMs
+        # Time point at which next update of noninteractive terminal may happen
+        self.nextUpdate: int = 0
 
         if not settings.forceMode:
             # Outside terminal we use simple basic progress reporting.
@@ -34,7 +39,12 @@ class ProgressReporter:
         if self.settings.mode == VisualizationMode.AnsiEscapes:
             self.io.write(self.header+'\x1b[s')
             self.io.flush()
+        else:
+            self.nextUpdate = clock() + self.updateIntervalNs
     def update(self, content: str, redraw: bool = False):
+        if self.settings.mode == VisualizationMode.DumbTerminal:
+            if clock() <= self.nextUpdate:
+                return
         padding = max(self.contentPadding-len(content), 0)
         if padding:
             if self.contentAlignLeft:
@@ -45,6 +55,7 @@ class ProgressReporter:
             paddedContent = content
         if self.settings.mode == VisualizationMode.DumbTerminal:
             self.io.write(self.header+paddedContent+self.footer+'\n')
+            self.nextUpdate = clock() + self.updateIntervalNs
         elif self.settings.mode == VisualizationMode.AnsiEscapes:
             if redraw:
                 self.open()

@@ -154,12 +154,12 @@ class ConfigFile:
     publicChannelDefaults: ChannelOptions = ChannelOptions()
 
     outputDirectory: Path = Path()
-    # verboseStandalonePosts: bool = False
     verboseHumanFriendlyPosts: bool = False
     downloadAllEmojis: bool = False
 
     verboseMode: bool = False
     reportProgress: ProgressSettings = ProgressSettings(mode=progress.VisualizationMode.AnsiEscapes)
+    progressInterval: int = 500
 
 # Note: types are not extensively checked, as we already have json schema for that
 def readConfig(filename: str) -> ConfigFile:
@@ -200,6 +200,8 @@ def readConfig(filename: str) -> ConfigFile:
                 else:
                     res.reportProgress = dataclasses.replace(
                         res.reportProgress, mode=progress.VisualizationMode.AnsiEscapes, forceMode=True)
+            if 'progressInterval' in reportingOptions:
+                res.progressInterval = reportingOptions['progressInterval']
 
 
         if 'defaultChannelOptions' in config:

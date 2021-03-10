@@ -346,6 +346,11 @@
         "showProgress": {
           "description": "True if smart interactive download progress be reported along the way (deduced by stdout type by default).",
           "type": ["boolean", "null"]
+        },
+        "progressInterval": {
+          "description": "Does not report progress updates more often than this interval in miliseconds (500ms by default). Not aplied in terminals supporting line editing.",
+          "type": "integer",
+          "default": 500
         }
       }
     }
