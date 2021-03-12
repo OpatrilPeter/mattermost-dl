@@ -1,8 +1,8 @@
 
-from common import *
-from bo import EntityLocator, Id, Time
-import progress
-from progress import ProgressSettings
+from .common import *
+from .bo import EntityLocator, Id, Time
+from . import progress
+from .progress import ProgressSettings
 
 import dataclasses
 import json

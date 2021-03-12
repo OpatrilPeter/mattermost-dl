@@ -19,7 +19,7 @@ __all__ = [
     'Team',
 ]
 
-from common import *
+from .common import *
 
 import dataclasses
 from datetime import datetime

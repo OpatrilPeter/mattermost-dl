@@ -9,8 +9,8 @@
         - posts are ordered by timestamp and should be continous
 '''
 
-from bo import *
-from common import *
+from .bo import *
+from .common import *
 
 class PostOrdering(Enum):
     '''

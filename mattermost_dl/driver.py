@@ -3,9 +3,9 @@
     represent (connection to) Mattermost server
 '''
 
-from common import *
-from bo import *
-from config import ConfigFile, OrderDirection
+from .common import *
+from .bo import *
+from .config import ConfigFile, OrderDirection
 
 import json
 import requests

@@ -3,7 +3,7 @@
     working in interactive and noninteractive environment.
 '''
 
-from common import *
+from .common import *
 
 from copy import copy
 from time import monotonic_ns as clock

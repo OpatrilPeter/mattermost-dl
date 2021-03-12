@@ -1,0 +1,4 @@
+# Unused as its presence forces pep517-style build which doesn't support user-side editable install
+[build-system]
+requires = ["setuptools >= 39.0.1", "wheel"]
+build-backend = "setuptools.build_meta"

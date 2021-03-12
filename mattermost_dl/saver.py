@@ -2,12 +2,12 @@
     Contains high level logic of history downloading
 '''
 
-from bo import *
-from common import *
-from config import ChannelOptions, ChannelSpec, ConfigFile, GroupChannelSpec, OrderDirection, TeamSpec
-from driver import MattermostDriver
-import progress
-from store import ChannelHeader, PostOrdering, PostStorage
+from .bo import *
+from .common import *
+from .config import ChannelOptions, ChannelSpec, ConfigFile, GroupChannelSpec, OrderDirection, TeamSpec
+from .driver import MattermostDriver
+from . import progress
+from .store import ChannelHeader, PostOrdering, PostStorage
 
 import json
 from mimetypes import guess_extension

@@ -4,8 +4,6 @@
 
 ### chore
 
-- python package & install
-  - copyright etc.
 - readme (detailed description of usage, notion of script samples)
 - make scripts rugged
 - add versioning to config
@@ -23,4 +21,5 @@
       - condition hit
       - session limit hit
       - connection timeout
+      - skipped due to refusing to delete archive
   - json schema validator
