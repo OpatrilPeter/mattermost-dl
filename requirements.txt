@@ -1,1 +1,2 @@
 requests
+jsonschema~=3.2

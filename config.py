@@ -6,7 +6,11 @@ from progress import ProgressSettings
 
 import dataclasses
 import json
+import jsonschema
 
+class ConfigurationError(Exception):
+    '''Invalid or missing configuration.'''
+    pass
 
 class OrderDirection(Enum):
     Asc = 0
@@ -121,12 +125,12 @@ class TeamSpec:
             self.publicChannelDefaults = globalPublicDefaults
 
         if 'downloadPrivateChannels' in info:
-            self.miscPrivateChannels = bool(info['downloadPrivateChannels'])
+            self.miscPrivateChannels = info['downloadPrivateChannels']
         if 'privateChannels' in info:
             assert isinstance(info['privateChannels'], list)
             self.explicitPrivateChannels = [ChannelSpec(chan, self.privateChannelDefaults) for chan in info['privateChannels']]
         if 'downloadPublicChannels' in info:
-            self.miscPublicChannels = bool(info['downloadPublicChannels'])
+            self.miscPublicChannels = info['downloadPublicChannels']
         if 'publicChannels' in info:
             assert isinstance(info['publicChannels'], list)
             self.explicitPublicChannels = [ChannelSpec(chan, self.publicChannelDefaults) for chan in info['publicChannels']]
@@ -161,94 +165,107 @@ class ConfigFile:
     reportProgress: ProgressSettings = ProgressSettings(mode=progress.VisualizationMode.AnsiEscapes)
     progressInterval: int = 500
 
-# Note: types are not extensively checked, as we already have json schema for that
-def readConfig(filename: str) -> ConfigFile:
-    with open(filename) as f:
-        config = json.load(f)
-        res = ConfigFile()
+    def readFile(self, filename: Path):
+        with open(filename) as f:
+            config = json.load(f)
 
-        assert 'connection' in config
-        connection = config['connection']
-        res.hostname = connection['hostname']
-        res.username = connection.get('username', '')
-        if res.username == '':
-            res.username = os.environ.get('MATTERMOST_USER', '')
-            if res.username == '':
-                logging.error(f'Field connection.username is missing in configuration.')
-                raise ValueError
-        res.password = connection.get('password', os.environ.get('MATTERMOST_PASSWORD', ''))
-        res.token = connection.get('token', os.environ.get('MATTERMOST_TOKEN', ''))
+            def validate(config: Any):
+                with open(sourceDirectory(__file__)/'config.schema.json') as schemaFile:
+                    configSchema = json.load(schemaFile)
+                validationFailed = False
+                errorMessage = ''
+                for error in jsonschema.Draft7Validator(configSchema).iter_errors(config):
+                    if not validationFailed:
+                        errorMessage += f'Config file {filename} doesn\'t match expected schema. List of error follows:\n'
+                        validationFailed = True
+                    errorMessage += f'  error: {error.message} at #/{"/".join(error.absolute_path)}\n'
+                    errorMessage += f'    invalid part: {error.instance}\n'
+                if validationFailed:
+                    logging.error(errorMessage)
+                    raise ConfigurationError
 
-        if 'throttling' in config:
-            res.throttlingLoopDelay = config['throttling']['loopDelay']
-        if 'output' in config:
-            output = config['output']
-            if 'directory' in output:
-                res.outputDirectory = Path(output['directory'])
-            if 'humanFriendlyPosts' in output:
-                res.verboseHumanFriendlyPosts = output['humanFriendlyPosts']
+            validate(config)
 
-        if 'report' in config:
-            reportingOptions = config['report']
+            assert 'connection' in config
+            connection = config['connection']
+            self.hostname = connection['hostname']
+            self.username = connection.get('username', '')
+            if self.username == '':
+                self.username = os.environ.get('MATTERMOST_USER', '')
+                if self.username == '':
+                    logging.error(f'Field connection.username is missing in configuration.')
+                    raise ValueError
+            self.password = connection.get('password', os.environ.get('MATTERMOST_PASSWORD', ''))
+            self.token = connection.get('token', os.environ.get('MATTERMOST_TOKEN', ''))
 
-            if 'verbose' in reportingOptions and reportingOptions['verbose']:
-                res.verboseMode = True
-            if 'showProgress' in reportingOptions and reportingOptions['showProgress'] is not None:
-                if not reportingOptions['showProgress']:
-                    res.reportProgress = dataclasses.replace(
-                        res.reportProgress, mode=progress.VisualizationMode.DumbTerminal, forceMode=True)
-                else:
-                    res.reportProgress = dataclasses.replace(
-                        res.reportProgress, mode=progress.VisualizationMode.AnsiEscapes, forceMode=True)
-            if 'progressInterval' in reportingOptions:
-                res.progressInterval = reportingOptions['progressInterval']
+            if 'throttling' in config:
+                self.throttlingLoopDelay = config['throttling']['loopDelay']
+            if 'output' in config:
+                output = config['output']
+                if 'directory' in output:
+                    self.outputDirectory = Path(output['directory'])
+                if 'humanFriendlyPosts' in output:
+                    self.verboseHumanFriendlyPosts = output['humanFriendlyPosts']
+
+            if 'report' in config:
+                reportingOptions = config['report']
+
+                if 'verbose' in reportingOptions and reportingOptions['verbose']:
+                    self.verboseMode = True
+                if 'showProgress' in reportingOptions and reportingOptions['showProgress'] is not None:
+                    if not reportingOptions['showProgress']:
+                        self.reportProgress = dataclasses.replace(
+                            self.reportProgress, mode=progress.VisualizationMode.DumbTerminal, forceMode=True)
+                    else:
+                        self.reportProgress = dataclasses.replace(
+                            self.reportProgress, mode=progress.VisualizationMode.AnsiEscapes, forceMode=True)
+                if 'progressInterval' in reportingOptions:
+                    self.progressInterval = reportingOptions['progressInterval']
 
 
-        if 'defaultChannelOptions' in config:
-            res.channelDefaults = ChannelOptions().update(config['defaultChannelOptions'])
-        if 'directChannelOptions' in config:
-            res.channelDefaults = ChannelOptions().update(config['directChannelOptions'])
-        else:
-            res.directChannelDefaults = res.channelDefaults
-        if 'groupChannelOptions' in config:
-            res.groupChannelDefaults = ChannelOptions().update(config['groupChannelOptions'])
-        else:
-            res.groupChannelDefaults = res.channelDefaults
-        if 'privateChannelOptions' in config:
-            res.privateChannelDefaults = ChannelOptions().update(config['privateChannelOptions'])
-        else:
-            res.privateChannelDefaults = res.channelDefaults
-        if 'publicChannelOptions' in config:
-            res.publicChannelDefaults = ChannelOptions().update(config['publicChannelOptions'])
-        else:
-            res.publicChannelDefaults = res.channelDefaults
+            if 'defaultChannelOptions' in config:
+                self.channelDefaults = ChannelOptions().update(config['defaultChannelOptions'])
+            if 'directChannelOptions' in config:
+                self.channelDefaults = ChannelOptions().update(config['directChannelOptions'])
+            else:
+                self.directChannelDefaults = self.channelDefaults
+            if 'groupChannelOptions' in config:
+                self.groupChannelDefaults = ChannelOptions().update(config['groupChannelOptions'])
+            else:
+                self.groupChannelDefaults = self.channelDefaults
+            if 'privateChannelOptions' in config:
+                self.privateChannelDefaults = ChannelOptions().update(config['privateChannelOptions'])
+            else:
+                self.privateChannelDefaults = self.channelDefaults
+            if 'publicChannelOptions' in config:
+                self.publicChannelDefaults = ChannelOptions().update(config['publicChannelOptions'])
+            else:
+                self.publicChannelDefaults = self.channelDefaults
 
-        if 'downloadTeams' in config:
-            res.miscTeams = bool(config['downloadTeams'])
-        if 'teams' in config:
-            assert isinstance(config['teams'], list)
-            res.explicitTeams = [
-                TeamSpec.fromConfig(teamDict, res.groupChannelDefaults, res.publicChannelDefaults)
-                for teamDict in config['teams']
-            ]
-        if 'downloadUserChannels' in config:
-            res.miscUserChannels = bool(config['downloadUserChannels'])
-        if 'users' in config:
-            assert isinstance(config['users'], list)
-            res.explicitUsers = [
-                ChannelSpec(userChannel, res.directChannelDefaults)
-                for userChannel in config['users']
-            ]
-        if 'downloadGroupChannels' in config:
-            res.miscGroupChannels = bool(config['downloadGroupChannels'])
-        if 'groups' in config:
-            assert isinstance(config['groups'], list)
-            res.explicitGroups = [
-                GroupChannelSpec(chan, res.groupChannelDefaults)
-                for chan in config['groups']
-            ]
+            if 'downloadTeams' in config:
+                self.miscTeams = bool(config['downloadTeams'])
+            if 'teams' in config:
+                assert isinstance(config['teams'], list)
+                self.explicitTeams = [
+                    TeamSpec.fromConfig(teamDict, self.groupChannelDefaults, self.publicChannelDefaults)
+                    for teamDict in config['teams']
+                ]
+            if 'downloadUserChannels' in config:
+                self.miscUserChannels = bool(config['downloadUserChannels'])
+            if 'users' in config:
+                assert isinstance(config['users'], list)
+                self.explicitUsers = [
+                    ChannelSpec(userChannel, self.directChannelDefaults)
+                    for userChannel in config['users']
+                ]
+            if 'downloadGroupChannels' in config:
+                self.miscGroupChannels = bool(config['downloadGroupChannels'])
+            if 'groups' in config:
+                assert isinstance(config['groups'], list)
+                self.explicitGroups = [
+                    GroupChannelSpec(chan, self.groupChannelDefaults)
+                    for chan in config['groups']
+                ]
 
-        if 'downloadEmojis' in config and config['downloadEmojis']:
-            res.downloadAllEmojis = True
-
-    return res
+            if 'downloadEmojis' in config and config['downloadEmojis']:
+                self.downloadAllEmojis = True

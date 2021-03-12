@@ -16,3 +16,6 @@ from typing import (
     Collection, Dict, Iterable, List, NewType, NoReturn,
     Optional, Set, Sized, TextIO, Tuple, Type, TypeVar, Union
 )
+
+def sourceDirectory(sourceFile: str) -> Path:
+    return Path(os.path.dirname(os.path.abspath(sourceFile)))
