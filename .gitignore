@@ -1,3 +1,4 @@
 .vscode/
 mattermost-dl.json
 *.pyc
+*.egg-info
