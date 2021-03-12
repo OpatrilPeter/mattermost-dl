@@ -24,6 +24,8 @@ from .common import *
 import dataclasses
 from datetime import datetime
 from functools import total_ordering
+import json
+import jsonschema
 
 class EntityLocator:
     def __init__(self, info: dict):
@@ -395,6 +397,8 @@ class PostReaction(JsonMessage):
 
 @dataclass
 class Post(JsonMessage):
+    _schemaValidator: ClassVar[jsonschema.Draft7Validator]
+
     id: Id
     userId: Id
     createTime: Time
@@ -512,6 +516,11 @@ class Post(JsonMessage):
         return f'Post(u={self.userId}, t={self.createTime}, m={self.message})'
 
     @classmethod
+    def fromStore(cls, info: dict):
+        cls._schemaValidator.validate(info)
+        return super().fromStore(info)
+
+    @classmethod
     def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
         if memberName in ('updateTime', 'publicUpdateTime', 'deleteTime'):
             return Time(jsonMemberValue)
@@ -525,6 +534,13 @@ class Post(JsonMessage):
             assert isinstance(jsonMemberValue, list)
             return [PostReaction.fromStore(r) for r in jsonMemberValue]
         return NotImplemented
+
+    @staticmethod
+    def loadSchemaValidator() -> jsonschema.Draft7Validator:
+        with open(sourceDirectory(__file__)/'post.schema.json') as schemaFile:
+            return jsonschema.Draft7Validator(json.load(schemaFile))
+
+Post._schemaValidator = Post.loadSchemaValidator()
 
 class ChannelType(Enum):
     Open = 'O'

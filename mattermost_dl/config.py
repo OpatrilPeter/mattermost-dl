@@ -6,11 +6,14 @@ from .progress import ProgressSettings
 
 import dataclasses
 import json
+from json.decoder import JSONDecodeError
 import jsonschema
 
 class ConfigurationError(Exception):
     '''Invalid or missing configuration.'''
-    pass
+    def __init__(self, filename, *args):
+        super().__init__(*args)
+        self.filename = filename
 
 class OrderDirection(Enum):
     Asc = 0
@@ -171,18 +174,21 @@ class ConfigFile:
 
             def validate(config: Any):
                 with open(sourceDirectory(__file__)/'config.schema.json') as schemaFile:
-                    configSchema = json.load(schemaFile)
+                    try:
+                        configSchema = json.load(schemaFile)
+                    except JSONDecodeError as exc:
+                        raise ConfigurationError(filename=filename) from exc
                 validationFailed = False
                 errorMessage = ''
                 for error in jsonschema.Draft7Validator(configSchema).iter_errors(config):
                     if not validationFailed:
-                        errorMessage += f'Config file {filename} doesn\'t match expected schema. List of error follows:\n'
+                        errorMessage += f'Config file {filename} doesn\'t match expected schema. List of errors follows:\n'
                         validationFailed = True
                     errorMessage += f'  error: {error.message} at #/{"/".join(error.absolute_path)}\n'
                     errorMessage += f'    invalid part: {error.instance}\n'
                 if validationFailed:
                     logging.error(errorMessage)
-                    raise ConfigurationError
+                    raise ConfigurationError(filename=filename)
 
             validate(config)
 

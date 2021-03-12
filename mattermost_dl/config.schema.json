@@ -136,11 +136,17 @@
     }
   },
   "required": [
+    "version",
     "connection"
   ],
   "properties": {
     "$schema": {
       "type": "string"
+    },
+    "version": {
+      "description": "Version of the config file schema. Used for backward compatibilty and problem reporting.",
+      "type": "string",
+      "default": "0"
     },
     "connection": {
       "description": "Contains all needed to set up a connection with the server.",
@@ -316,7 +322,8 @@
       "properties": {
         "loopDelay": {
           "description": "Delay between bulk requests in ms.",
-          "type": "integer"
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

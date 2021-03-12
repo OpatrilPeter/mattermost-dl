@@ -12,6 +12,9 @@
 from .bo import *
 from .common import *
 
+import json
+import jsonschema
+
 class PostOrdering(Enum):
     '''
         Describes how posts are organized in the storage
@@ -76,6 +79,8 @@ class PostStorage(JsonMessage):
 
 @dataclass
 class ChannelHeader:
+    _schemaValidator: ClassVar[jsonschema.Draft7Validator]
+
     channel: Channel
     team: Optional[Team] = None # Missing if channel is not scoped under team
     storage: Optional[PostStorage] = None # Missing if channel has no messages, so `storage.count > 0` shall hold
@@ -85,22 +90,16 @@ class ChannelHeader:
     usedEmojis: Set[Emoji] = dataclassfield(default_factory=set)
 
     @classmethod
-    def fromStore(cls, info: dict):
+    def fromStore(cls, info: Any):
         '''
             Loading previously saved header.
         '''
+        info = cls.validateSchema(info)
+
         # Any default constructible class having __dict__ will do for mock
         class _Header:
             pass
         self = cast(ChannelHeader, _Header())
-        if 'version' not in info:
-            logging.warning('Channel metadata is missing versioning information, it may not be loadable and some data may be lost.')
-        elif not isinstance(info['version'], str) or not re.match(r'^\d+(\.\d+(\.\d+)?.*)?', info['version']):
-            logging.warning(f'Channel metadata is not having recognized {info["version"]}, it may not be loadable and some data may be lost.')
-        else:
-            version = info['version']
-            if not re.match(r'^0\.?.*', version):
-                logging.warning(f'Loading channel from future version {version}, current version is 0. It may not be loadable and some data may be lost.')
         self.channel = Channel.fromStore(info['channel'])
         if 'users' in info:
             self.usedUsers = set()
@@ -142,3 +141,35 @@ class ChannelHeader:
             content.update(emojis=[e.toStore() for e in self.usedEmojis])
 
         return content
+
+    @staticmethod
+    def loadSchemaValidator() -> jsonschema.Draft7Validator:
+        with open(sourceDirectory(__file__)/'header.schema.json') as schemaFile:
+            return jsonschema.Draft7Validator(json.load(schemaFile))
+
+    @classmethod
+    def validateSchema(cls, info: Any) -> dict:
+        if not isinstance(info, dict):
+            logging.error(f'Channel header is not of object JSON type (real python type {type(info)}).')
+            raise jsonschema.FormatError('Not an object type.')
+        if 'version' not in info:
+            logging.warning('Channel metadata is missing versioning information, it may not be loadable and some data may be lost.')
+        elif not isinstance(info['version'], str) or not re.match(r'^\d+(\.\d+(\.\d+)?.*)?', info['version']):
+            logging.warning(f'Channel metadata is not having recognized {info["version"]}, it may not be loadable and some data may be lost.')
+        else:
+            version = info['version']
+            if not re.match(r'^0\.?.*', version):
+                logging.warning(f'Loading channel from future version {version}, current version is 0. It may not be loadable and some data may be lost.')
+
+        errorMessage = ''
+        for error in cls._schemaValidator.iter_errors(info):
+            if errorMessage == '':
+                errorMessage = f'Channel header schema validation failed. List of errors follows:\n'
+            errorMessage += f'  error: {error.message} at #/{"/".join(error.absolute_path)}\n'
+            errorMessage += f'    invalid part: {error.instance}\n'
+        if errorMessage != '':
+            logging.error(errorMessage)
+            raise ValueError
+        return info
+
+ChannelHeader._schemaValidator = ChannelHeader.loadSchemaValidator()

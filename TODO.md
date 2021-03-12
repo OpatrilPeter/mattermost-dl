@@ -22,4 +22,3 @@
       - session limit hit
       - connection timeout
       - skipped due to refusing to delete archive
-  - json schema validator

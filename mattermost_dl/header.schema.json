@@ -14,8 +14,7 @@
     "properties": {
         "version": {
             "description": "Version of the format.",
-            "type": "string",
-            "pattern": "^0\\.?.*"
+            "type": "string"
         },
         "channel": {
             "description": "Channel's metadata.",

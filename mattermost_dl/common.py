@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import sys
 from typing import (
-    Any, BinaryIO, Callable, cast,
+    Any, BinaryIO, Callable, cast, ClassVar,
     Collection, Dict, Iterable, List, NewType, NoReturn,
     Optional, Set, Sized, TextIO, Tuple, Type, TypeVar, Union
 )
