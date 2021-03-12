@@ -44,7 +44,7 @@ def selectConfigFile() -> Path:
             return confPath
         locations.append(confPath)
     if 'HOME' in os.environ:
-        confPath = Path(os.environ['HOME'])/'.config/.mattermost-dl.json'
+        confPath = Path(os.environ['HOME'])/'.config/mattermost-dl.json'
         if confPath.is_file():
             return confPath
         locations.append(confPath)
