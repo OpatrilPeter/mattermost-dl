@@ -26,6 +26,7 @@ class MattermostDriver:
         # Information we get along the way
         self.context: Dict[str, Any] = {}
         self.cache = Cache()
+        self.session = requests.Session()
 
     def onBadHttpResponse(self, request: str, result: requests.Response) -> NoReturn:
         message = None
@@ -57,7 +58,7 @@ class MattermostDriver:
         headers = {}
         if self.authorizationToken:
             headers.update({'Authorization': 'Bearer '+self.authorizationToken})
-        r = requests.get(self.configfile.hostname + self.API_PART + apiCommand, headers=headers, params=params)
+        r = self.session.get(self.configfile.hostname + self.API_PART + apiCommand, headers=headers, params=params)
         if r.status_code != 200:
             self.onBadHttpResponse(apiCommand, r)
         return r
@@ -82,7 +83,7 @@ class MattermostDriver:
         headers = {}
         if self.authorizationToken:
             headers.update({'Token': self.authorizationToken})
-        r = requests.post(self.configfile.hostname + self.API_PART + apiCommand, json.dumps(data), headers=headers)
+        r = self.session.post(self.configfile.hostname + self.API_PART + apiCommand, json.dumps(data), headers=headers)
         if r.status_code != 200:
             self.onBadHttpResponse(apiCommand, r)
         return r
