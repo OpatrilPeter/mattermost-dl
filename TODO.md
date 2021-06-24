@@ -5,7 +5,6 @@
 ### chore
 
 - readme (detailed description of usage)
-- make scripts rugged
 
 ### feat
 
