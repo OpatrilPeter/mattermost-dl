@@ -4,6 +4,7 @@
 '''
 
 __all__ = [
+    'StoreError',
     'EntityLocator',
     'Id',
     'Time',
@@ -20,12 +21,19 @@ __all__ = [
 ]
 
 from .common import *
+from .jsonvalidation import validate as validateJson, formatValidationErrors
+from . import jsonvalidation
 
+from collections.abc import Iterable
 import dataclasses
 from datetime import datetime
 from functools import total_ordering
 import json
 import jsonschema
+
+class StoreError(Exception):
+    '''Failed to load from the storage of downloaded content.'''
+    pass
 
 class EntityLocator:
     def __init__(self, info: dict):
@@ -180,7 +188,7 @@ class JsonMessage:
                     knownInfo[key] = value
             else:
                 logging.error(f"Can't load type `{cls.__name__}` from JSON form automatically, field `{key}` of type `{FieldType.__name__ if hasattr(FieldType, '__name__') else FieldType}` can't be converted.")
-                raise TypeError
+                raise StoreError
         return cls(misc=misc, **knownInfo)
 
 @dataclass
@@ -516,7 +524,24 @@ class Post(JsonMessage):
         return f'Post(u={self.userId}, t={self.createTime}, m={self.message})'
 
     @classmethod
-    def fromStore(cls, info: dict):
+    def fromStore(cls, info: dict,
+        onWarning: Optional[Callable[[jsonvalidation.ValidationWarnings], None]] = None,
+        onError: Optional[Callable[[jsonvalidation.ValidationErrors], NoReturn]] = None):
+
+        if onWarning is None:
+            def onWarningDefault(w):
+                logging.warning(f"Load of post caused warning '{w}', it may not be loadable correctly.")
+            onWarning = onWarningDefault
+        if onError is None:
+            def onErrorDefault(e):
+                if isinstance(e, jsonvalidation.BadObject):
+                    logging.error(f"Failed to load post, loaded json object has unsupported type {e.recieved}.")
+                else:
+                    assert isinstance(e, Iterable)
+                    logging.error("Configuration didn't match expected schema. " + formatValidationErrors(e))
+                raise StoreError
+            onError = onErrorDefault
+        validateJson(info, cls._schemaValidator, acceptedVersion='0', onWarning=onWarning, onError=onError)
         cls._schemaValidator.validate(info)
         return super().fromStore(info)
 

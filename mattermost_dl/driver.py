@@ -70,7 +70,11 @@ class MattermostDriver:
         '''
         apiCommand = apiCommand.format(**self.context)
         r = self.getRaw(apiCommand, params)
-        return r.json()
+        r = r.json()
+        # We're guaranteeing certain types on output
+        if not isinstance(r, (dict, list)):
+            raise TypeError
+        return r
 
     def storeUrlInto(self, url: str, fp: BinaryIO):
         response = self.getRaw(url)

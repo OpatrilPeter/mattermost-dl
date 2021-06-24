@@ -4,7 +4,7 @@
 
 from .bo import *
 from .common import *
-from .config import ChannelOptions, ChannelSpec, ConfigFile, GroupChannelSpec, OrderDirection, TeamSpec
+from .config import ChannelOptions, ConfigFile, GroupChannelSpec, OrderDirection, TeamSpec
 from .driver import MattermostDriver
 from . import progress
 from .store import ChannelHeader, PostOrdering, PostStorage
@@ -191,6 +191,7 @@ class Saver:
                         suffix = ''
             else:
                 suffix = ''
+        assert isinstance(suffix, str)
         fullFilename = directoryName / (filename + suffix)
         if fullFilename.exists() and not redownload:
             return filename + suffix

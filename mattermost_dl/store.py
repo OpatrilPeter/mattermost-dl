@@ -11,20 +11,26 @@
 
 from .bo import *
 from .common import *
+from .jsonvalidation import validate as validateJson, formatValidationErrors
+from . import jsonvalidation
+from collections.abc import Iterable
 
 import json
 import jsonschema
+# HACK: Pyright linter doesn't recognize special meaning of ClassVar from .common in dataclasses
+from typing import ClassVar
+
 
 class PostOrdering(Enum):
     '''
         Describes how posts are organized in the storage
     '''
 
-    Unsorted = 0 # May even have duplicates
-    Ascending = 1 # Sorted from oldest to newest
-    Descending = 2 # Sorted from newest to oldest
-    AscendingContinuous = 3 # Sorted from oldest to newest, no posts missing in interval
-    DescendingContinuous = 4 # Sorted from newest to oldest, no posts missing in interval
+    Unsorted = 0  # May even have duplicates
+    Ascending = 1  # Sorted from oldest to newest
+    Descending = 2  # Sorted from newest to oldest
+    AscendingContinuous = 3  # Sorted from oldest to newest, no posts missing in interval
+    DescendingContinuous = 4  # Sorted from newest to oldest, no posts missing in interval
 
     @classmethod
     def fromStore(cls, info: str) -> 'PostOrdering':
@@ -32,7 +38,8 @@ class PostOrdering(Enum):
             if info == member.name:
                 return member
         else:
-            logging.warning(f"Unknown channel ordering type '{info}', assumed unsorted.")
+            logging.warning(
+                f"Unknown channel ordering type '{info}', assumed unsorted.")
             return PostOrdering.Unsorted
 
     def toStore(self) -> str:
@@ -77,13 +84,15 @@ class PostStorage(JsonMessage):
             return jsonMemberValue
         return NotImplemented
 
+
 @dataclass
 class ChannelHeader:
     _schemaValidator: ClassVar[jsonschema.Draft7Validator]
 
     channel: Channel
-    team: Optional[Team] = None # Missing if channel is not scoped under team
-    storage: Optional[PostStorage] = None # Missing if channel has no messages, so `storage.count > 0` shall hold
+    team: Optional[Team] = None  # Missing if channel is not scoped under team
+    # Missing if channel has no messages, so `storage.count > 0` shall hold
+    storage: Optional[PostStorage] = None
     # Users that appeared in conversations
     usedUsers: Set[User] = dataclassfield(default_factory=set)
     # Emojis that appeared in conversations
@@ -94,12 +103,23 @@ class ChannelHeader:
         '''
             Loading previously saved header.
         '''
-        info = cls.validateSchema(info)
+        def onWarning(w):
+            if isinstance(w, jsonvalidation.UnsupportedVersion):
+                logging.warning(
+                    f'Loading channel from future version {w.found}, current version is 0. It may not be loadable and some data may be lost.')
+            else:
+                logging.warning(f"Channel header encountered warning '{w}', it may not be loadable correctly.")
+        def onError(e):
+            if isinstance(e, jsonvalidation.BadObject):
+                logging.error(f"Failed to load channel header, loaded json object has unsupported type {e.recieved}.")
+            else:
+                assert isinstance(e, Iterable)
+                logging.error("Configuration didn't match expected schema. " + formatValidationErrors(e))
+            raise StoreError
+        info = validateJson(info, cls._schemaValidator,
+                            acceptedVersion='0', onWarning=onWarning, onError=onError)
 
-        # Any default constructible class having __dict__ will do for mock
-        class _Header:
-            pass
-        self = cast(ChannelHeader, _Header())
+        self = cast(ChannelHeader, ClassMock())
         self.channel = Channel.fromStore(info['channel'])
         if 'users' in info:
             self.usedUsers = set()
@@ -146,30 +166,5 @@ class ChannelHeader:
     def loadSchemaValidator() -> jsonschema.Draft7Validator:
         with open(sourceDirectory(__file__)/'header.schema.json') as schemaFile:
             return jsonschema.Draft7Validator(json.load(schemaFile))
-
-    @classmethod
-    def validateSchema(cls, info: Any) -> dict:
-        if not isinstance(info, dict):
-            logging.error(f'Channel header is not of object JSON type (real python type {type(info)}).')
-            raise jsonschema.FormatError('Not an object type.')
-        if 'version' not in info:
-            logging.warning('Channel metadata is missing versioning information, it may not be loadable and some data may be lost.')
-        elif not isinstance(info['version'], str) or not re.match(r'^\d+(\.\d+(\.\d+)?.*)?', info['version']):
-            logging.warning(f'Channel metadata is not having recognized {info["version"]}, it may not be loadable and some data may be lost.')
-        else:
-            version = info['version']
-            if not re.match(r'^0\.?.*', version):
-                logging.warning(f'Loading channel from future version {version}, current version is 0. It may not be loadable and some data may be lost.')
-
-        errorMessage = ''
-        for error in cls._schemaValidator.iter_errors(info):
-            if errorMessage == '':
-                errorMessage = f'Channel header schema validation failed. List of errors follows:\n'
-            errorMessage += f'  error: {error.message} at #/{"/".join(error.absolute_path)}\n'
-            errorMessage += f'    invalid part: {error.instance}\n'
-        if errorMessage != '':
-            logging.error(errorMessage)
-            raise ValueError
-        return info
 
 ChannelHeader._schemaValidator = ChannelHeader.loadSchemaValidator()

@@ -1,9 +1,16 @@
+'''
+    Defines configuration options of the program
+    and handles their loading from JSON
+'''
 
 from .common import *
 from .bo import EntityLocator, Id, Time
+from . import jsonvalidation
+from .jsonvalidation import validate as validateJson, formatValidationErrors
 from . import progress
 from .progress import ProgressSettings
 
+from collections.abc import Iterable
 import dataclasses
 import json
 from json.decoder import JSONDecodeError
@@ -11,7 +18,7 @@ import jsonschema
 
 class ConfigurationError(Exception):
     '''Invalid or missing configuration.'''
-    def __init__(self, filename, *args):
+    def __init__(self, filename: Path, *args):
         super().__init__(*args)
         self.filename = filename
 
@@ -142,6 +149,8 @@ class TeamSpec:
 
 @dataclass
 class ConfigFile:
+    _schemaValidator: ClassVar[jsonschema.Draft7Validator]
+
     hostname: str = ''
     username: str = ''
     password: str = ''
@@ -168,110 +177,116 @@ class ConfigFile:
     reportProgress: ProgressSettings = ProgressSettings(mode=progress.VisualizationMode.AnsiEscapes)
     progressInterval: int = 500
 
-    def readFile(self, filename: Path):
+    @staticmethod
+    def loadSchemaValidator() -> jsonschema.Draft7Validator:
+        with open(sourceDirectory(__file__)/'config.schema.json') as schemaFile:
+            return jsonschema.Draft7Validator(json.load(schemaFile))
+
+    @staticmethod
+    def fromFile(filename: Path) -> 'ConfigFile':
         with open(filename) as f:
-            config = json.load(f)
+            try:
+                config = json.load(f)
+            except JSONDecodeError as exc:
+                raise ConfigurationError(filename) from exc
 
-            def validate(config: Any):
-                with open(sourceDirectory(__file__)/'config.schema.json') as schemaFile:
-                    try:
-                        configSchema = json.load(schemaFile)
-                    except JSONDecodeError as exc:
-                        raise ConfigurationError(filename=filename) from exc
-                validationFailed = False
-                errorMessage = ''
-                for error in jsonschema.Draft7Validator(configSchema).iter_errors(config):
-                    if not validationFailed:
-                        errorMessage += f'Config file {filename} doesn\'t match expected schema. List of errors follows:\n'
-                        validationFailed = True
-                    errorMessage += f'  error: {error.message} at #/{"/".join(error.absolute_path)}\n'
-                    errorMessage += f'    invalid part: {error.instance}\n'
-                if validationFailed:
-                    logging.error(errorMessage)
-                    raise ConfigurationError(filename=filename)
+            def onWarning(w):
+                logging.warning(f"Encountered warning '{w}', configuration may not be correctly loadable.")
+            def onError(e):
+                if isinstance(e, jsonvalidation.BadObject):
+                    logging.error(f"Failed to load configuration, loaded json object has unsupported type {e.recieved}.")
+                else:
+                    assert isinstance(e, Iterable)
+                    logging.error("Configuration didn't match expected schema. " + formatValidationErrors(e))
+                raise ConfigurationError(filename=filename)
 
-            validate(config)
+            validateJson(config, ConfigFile._schemaValidator,
+                acceptedVersion='0',
+                onWarning=onWarning,
+                onError=onError,
+            )
 
-            assert 'connection' in config
-            connection = config['connection']
-            self.hostname = connection['hostname']
-            self.username = connection.get('username', '')
-            if self.username == '':
-                self.username = os.environ.get('MATTERMOST_USER', '')
-                if self.username == '':
-                    logging.error(f'Field connection.username is missing in configuration.')
-                    raise ValueError
-            self.password = connection.get('password', os.environ.get('MATTERMOST_PASSWORD', ''))
-            self.token = connection.get('token', os.environ.get('MATTERMOST_TOKEN', ''))
+            return ConfigFile.fromJson(config)
 
-            if 'throttling' in config:
-                self.throttlingLoopDelay = config['throttling']['loopDelay']
-            if 'output' in config:
-                output = config['output']
-                if 'directory' in output:
-                    self.outputDirectory = Path(output['directory'])
-                if 'humanFriendlyPosts' in output:
-                    self.verboseHumanFriendlyPosts = output['humanFriendlyPosts']
+    @staticmethod
+    def fromJson(config: dict) -> 'ConfigFile':
+        self = cast(ConfigFile, ClassMock())
+        connection = config['connection']
+        self.hostname = connection['hostname']
+        self.username = connection['username']
+        self.password = connection.get('password', os.environ.get('MATTERMOST_PASSWORD', ''))
+        self.token = connection.get('token', os.environ.get('MATTERMOST_TOKEN', ''))
 
-            if 'report' in config:
-                reportingOptions = config['report']
+        if 'throttling' in config:
+            self.throttlingLoopDelay = config['throttling']['loopDelay']
+        if 'output' in config:
+            output = config['output']
+            if 'directory' in output:
+                self.outputDirectory = Path(output['directory'])
+            if 'humanFriendlyPosts' in output:
+                self.verboseHumanFriendlyPosts = output['humanFriendlyPosts']
 
-                if 'verbose' in reportingOptions and reportingOptions['verbose']:
-                    self.verboseMode = True
-                if 'showProgress' in reportingOptions and reportingOptions['showProgress'] is not None:
-                    if not reportingOptions['showProgress']:
-                        self.reportProgress = dataclasses.replace(
-                            self.reportProgress, mode=progress.VisualizationMode.DumbTerminal, forceMode=True)
-                    else:
-                        self.reportProgress = dataclasses.replace(
-                            self.reportProgress, mode=progress.VisualizationMode.AnsiEscapes, forceMode=True)
-                if 'progressInterval' in reportingOptions:
-                    self.progressInterval = reportingOptions['progressInterval']
+        if 'report' in config:
+            reportingOptions = config['report']
+
+            if 'verbose' in reportingOptions and reportingOptions['verbose']:
+                self.verboseMode = True
+            if 'showProgress' in reportingOptions and reportingOptions['showProgress'] is not None:
+                if not reportingOptions['showProgress']:
+                    self.reportProgress = progress.ProgressSettings(mode=progress.VisualizationMode.DumbTerminal, forceMode=True)
+                else:
+                    self.reportProgress = progress.ProgressSettings(mode=progress.VisualizationMode.AnsiEscapes, forceMode=True)
+            if 'progressInterval' in reportingOptions:
+                self.progressInterval = reportingOptions['progressInterval']
 
 
-            if 'defaultChannelOptions' in config:
-                self.channelDefaults = ChannelOptions().update(config['defaultChannelOptions'])
-            if 'directChannelOptions' in config:
-                self.channelDefaults = ChannelOptions().update(config['directChannelOptions'])
-            else:
-                self.directChannelDefaults = self.channelDefaults
-            if 'groupChannelOptions' in config:
-                self.groupChannelDefaults = ChannelOptions().update(config['groupChannelOptions'])
-            else:
-                self.groupChannelDefaults = self.channelDefaults
-            if 'privateChannelOptions' in config:
-                self.privateChannelDefaults = ChannelOptions().update(config['privateChannelOptions'])
-            else:
-                self.privateChannelDefaults = self.channelDefaults
-            if 'publicChannelOptions' in config:
-                self.publicChannelDefaults = ChannelOptions().update(config['publicChannelOptions'])
-            else:
-                self.publicChannelDefaults = self.channelDefaults
+        if 'defaultChannelOptions' in config:
+            self.channelDefaults = ChannelOptions().update(config['defaultChannelOptions'])
+        if 'directChannelOptions' in config:
+            self.channelDefaults = ChannelOptions().update(config['directChannelOptions'])
+        else:
+            self.directChannelDefaults = self.channelDefaults
+        if 'groupChannelOptions' in config:
+            self.groupChannelDefaults = ChannelOptions().update(config['groupChannelOptions'])
+        else:
+            self.groupChannelDefaults = self.channelDefaults
+        if 'privateChannelOptions' in config:
+            self.privateChannelDefaults = ChannelOptions().update(config['privateChannelOptions'])
+        else:
+            self.privateChannelDefaults = self.channelDefaults
+        if 'publicChannelOptions' in config:
+            self.publicChannelDefaults = ChannelOptions().update(config['publicChannelOptions'])
+        else:
+            self.publicChannelDefaults = self.channelDefaults
 
-            if 'downloadTeams' in config:
-                self.miscTeams = bool(config['downloadTeams'])
-            if 'teams' in config:
-                assert isinstance(config['teams'], list)
-                self.explicitTeams = [
-                    TeamSpec.fromConfig(teamDict, self.groupChannelDefaults, self.publicChannelDefaults)
-                    for teamDict in config['teams']
-                ]
-            if 'downloadUserChannels' in config:
-                self.miscUserChannels = bool(config['downloadUserChannels'])
-            if 'users' in config:
-                assert isinstance(config['users'], list)
-                self.explicitUsers = [
-                    ChannelSpec(userChannel, self.directChannelDefaults)
-                    for userChannel in config['users']
-                ]
-            if 'downloadGroupChannels' in config:
-                self.miscGroupChannels = bool(config['downloadGroupChannels'])
-            if 'groups' in config:
-                assert isinstance(config['groups'], list)
-                self.explicitGroups = [
-                    GroupChannelSpec(chan, self.groupChannelDefaults)
-                    for chan in config['groups']
-                ]
+        if 'downloadTeams' in config:
+            self.miscTeams = config['downloadTeams']
+        if 'teams' in config:
+            assert isinstance(config['teams'], list)
+            self.explicitTeams = [
+                TeamSpec.fromConfig(teamDict, self.groupChannelDefaults, self.publicChannelDefaults)
+                for teamDict in config['teams']
+            ]
+        if 'downloadUserChannels' in config:
+            self.miscUserChannels = config['downloadUserChannels']
+        if 'users' in config:
+            assert isinstance(config['users'], list)
+            self.explicitUsers = [
+                ChannelSpec(userChannel, self.directChannelDefaults)
+                for userChannel in config['users']
+            ]
+        if 'downloadGroupChannels' in config:
+            self.miscGroupChannels = config['downloadGroupChannels']
+        if 'groups' in config:
+            assert isinstance(config['groups'], list)
+            self.explicitGroups = [
+                GroupChannelSpec(chan, self.groupChannelDefaults)
+                for chan in config['groups']
+            ]
 
-            if 'downloadEmojis' in config and config['downloadEmojis']:
-                self.downloadAllEmojis = True
+        if 'downloadEmojis' in config and config['downloadEmojis']:
+            self.downloadAllEmojis = True
+
+        return ConfigFile(**self.__dict__)
+
+ConfigFile._schemaValidator = ConfigFile.loadSchemaValidator()

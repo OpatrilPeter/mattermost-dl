@@ -162,16 +162,21 @@
           "type": "string"
         },
         "usedApi": {
+          "description": "What version of Mattermost API to use. Currently, only v4 is supported, so this field mostly serves as additional forward compatibility check.",
           "type": "number",
           "const": 4
         },
         "username": {
-          "type": "string"
+          "description": "Mattermost username to login as.",
+          "type": "string",
+          "minLength": 1
         },
         "password": {
+          "description": "Password for provided username. Not necessary if login happens through through alternative strategies (like providing authentication token).",
           "type": "string"
         },
         "token": {
+          "description": "Mattermost authentication token used for logging in and also for all subsequent requests. Not required if password authentication is chosen instead. Note that tokens are typically temporary and need to be refreshed once the session expires. Creation of long term tokens is permitted, but not available for ordinary users by default.",
           "type": "string"
         }
       }

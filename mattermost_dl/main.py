@@ -32,7 +32,7 @@ def parseArgs() -> ArgNamespace:
     args = argumentParser.parse_args()
     return args
 
-def selectConfigFile() -> Path:
+def selectConfigFile() -> Optional[Path]:
     locations = []
     confPath = Path('./mattermost-dl.json')
     if confPath.is_file():
@@ -50,7 +50,7 @@ def selectConfigFile() -> Path:
         locations.append(confPath)
 
     logging.error(f'No configuration file found, searched locations follow: {locations}')
-    raise ConfigurationError
+    return None
 
 def main():
     args = parseArgs()
@@ -58,10 +58,15 @@ def main():
 
     if args.conf is None:
         args.conf = selectConfigFile()
+        if args.conf is None:
+            sys.exit(1)
 
-    conffile = ConfigFile()
-    conffile.readFile(args.conf)
-    conffile.verboseMode = any((conffile.verboseMode, args.verbose))
+    try:
+        conffile = ConfigFile.fromFile(args.conf)
+        conffile.verboseMode = any((conffile.verboseMode, args.verbose))
+    except ConfigurationError as err:
+        logging.fatal(f'Configuration file {err.filename} couldn\'t be loaded.')
+        sys.exit(1)
     setupLogging(verboseMode=conffile.verboseMode)
 
     Saver(conffile)()
