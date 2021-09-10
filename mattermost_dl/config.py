@@ -242,8 +242,10 @@ class ConfigFile:
 
         if 'defaultChannelOptions' in config:
             self.channelDefaults = ChannelOptions().update(config['defaultChannelOptions'])
+        else:
+            self.channelDefaults = ChannelOptions()
         if 'directChannelOptions' in config:
-            self.channelDefaults = ChannelOptions().update(config['directChannelOptions'])
+            self.directChannelDefaults = ChannelOptions().update(config['directChannelOptions'])
         else:
             self.directChannelDefaults = self.channelDefaults
         if 'groupChannelOptions' in config:
