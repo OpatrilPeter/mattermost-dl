@@ -41,11 +41,11 @@ class EntityLocator:
         for key in info:
             if key in ('id', 'name', 'internalName'):
                 if ok:
-                    raise ValueError
+                    raise ValueError('EntityLocator with multiple (possibly conflicting) identificators.')
                 ok = True
         else:
             if not ok:
-                raise ValueError
+                raise ValueError('EntityLocator has no identificator.')
         if 'id' in info:
             self.id: Id = info['id']
         if 'name' in info:

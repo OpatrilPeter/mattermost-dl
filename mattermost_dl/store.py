@@ -79,6 +79,13 @@ class PostStorage(JsonMessage):
             self.postIdAfterLast = other.postIdAfterLast
 
     @classmethod
+    def fromStore(cls, info: dict) -> Optional['PostStorage']:
+        storage = super().fromStore(info)
+        if storage.count == 0:
+            return None
+        return storage
+
+    @classmethod
     def memberFromStore(cls, memberName: str, jsonMemberValue: Any) -> Any:
         if memberName in ('firstPostId', 'lastPostId', 'postIdBeforeFirst', 'postIdAfterLast'):
             return jsonMemberValue
@@ -154,7 +161,8 @@ class ChannelHeader:
         if self.team:
             content.update(team=self.team.toStore(includeChannels=False))
         content.update(channel=self.channel.toStore())
-        content.update(storage=self.storage.toStore())
+        if self.storage is not None and self.storage.count > 0:
+            content.update(storage=self.storage.toStore())
         if self.usedUsers:
             content.update(users=[u.toStore() for u in self.usedUsers])
         if self.usedEmojis:
