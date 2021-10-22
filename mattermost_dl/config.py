@@ -16,6 +16,12 @@ import json
 from json.decoder import JSONDecodeError
 import jsonschema
 
+
+class LogVerbosity(Enum):
+    ProblemsOnly = enumerator()
+    Normal = enumerator()
+    Verbose = enumerator()
+
 class ConfigurationError(Exception):
     '''Invalid or missing configuration.'''
     def __init__(self, filename: Path, *args):
@@ -107,10 +113,10 @@ class GroupChannelSpec:
 class TeamSpec:
     locator: EntityLocator
     miscPrivateChannels: bool = True
-    explicitPrivateChannels: List[ChannelSpec] = dataclasses.field(default_factory=list)
+    explicitPrivateChannels: List[ChannelSpec] = dataclassfield(default_factory=list)
     privateChannelDefaults: ChannelOptions = ChannelOptions()
     miscPublicChannels: bool = True
-    explicitPublicChannels: List[ChannelSpec] = dataclasses.field(default_factory=list)
+    explicitPublicChannels: List[ChannelSpec] = dataclassfield(default_factory=list)
     publicChannelDefaults: ChannelOptions = ChannelOptions()
 
     @staticmethod
@@ -158,11 +164,11 @@ class ConfigFile:
 
     throttlingLoopDelay: int = 0
     miscTeams: bool = True
-    explicitTeams: List[TeamSpec] = dataclasses.field(default_factory=list)
+    explicitTeams: List[TeamSpec] = dataclassfield(default_factory=list)
     miscUserChannels: bool = True
-    explicitUsers: List[ChannelSpec] = dataclasses.field(default_factory=list)
+    explicitUsers: List[ChannelSpec] = dataclassfield(default_factory=list)
     miscGroupChannels: bool = True
-    explicitGroups: List[GroupChannelSpec] = dataclasses.field(default_factory=list)
+    explicitGroups: List[GroupChannelSpec] = dataclassfield(default_factory=list)
     channelDefaults: ChannelOptions = ChannelOptions()
     directChannelDefaults: ChannelOptions = ChannelOptions()
     groupChannelDefaults: ChannelOptions = ChannelOptions()
@@ -173,7 +179,7 @@ class ConfigFile:
     verboseHumanFriendlyPosts: bool = False
     downloadAllEmojis: bool = False
 
-    verboseMode: bool = False
+    verbosity: LogVerbosity = LogVerbosity.Normal
     reportProgress: ProgressSettings = ProgressSettings(mode=progress.VisualizationMode.AnsiEscapes)
     progressInterval: int = 500
 
@@ -229,8 +235,10 @@ class ConfigFile:
         if 'report' in config:
             reportingOptions = config['report']
 
-            if 'verbose' in reportingOptions and reportingOptions['verbose']:
-                self.verboseMode = True
+            if 'verbosity' in reportingOptions:
+                level = reportingOptions['verbosity']
+                assert isinstance(level, int)
+                self.verbosity = LogVerbosity(level + 1)
             if 'showProgress' in reportingOptions and reportingOptions['showProgress'] is not None:
                 if not reportingOptions['showProgress']:
                     self.reportProgress = progress.ProgressSettings(mode=progress.VisualizationMode.DumbTerminal, forceMode=True)

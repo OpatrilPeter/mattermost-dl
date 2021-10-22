@@ -350,9 +350,12 @@
     "report": {
       "type": "object",
       "properties": {
-        "verbose": {
-          "description": "Shows extra information, useful for debugging.",
-          "type": "boolean"
+        "verbosity": {
+          "description": "Chooses level of information that program outputs.\n0 - quiet mode, only problems are shown\n1 - default mode, optimal for user facing interactive use\n2 - verbose mode with extra information, useful for debugging",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 1
         },
         "showProgress": {
           "description": "True if smart interactive download progress be reported along the way (deduced by stdout type by default).",

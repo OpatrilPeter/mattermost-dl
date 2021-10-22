@@ -4,7 +4,7 @@
 
 from .bo import *
 from .common import *
-from .config import ChannelOptions, ConfigFile, GroupChannelSpec, OrderDirection, TeamSpec
+from .config import ChannelOptions, ConfigFile, GroupChannelSpec, LogVerbosity, OrderDirection, TeamSpec
 from .driver import MattermostDriver
 from . import progress
 from .store import ChannelHeader, PostOrdering, PostStorage
@@ -312,7 +312,7 @@ class Saver:
                 self.enrichPostReaction(reaction)
 
     def showProgressReport(self) -> bool:
-        return (not self.configfile.verboseMode
+        return (self.configfile.verbosity == LogVerbosity.Normal
             and self.configfile.reportProgress.mode != progress.VisualizationMode.DumbTerminal)
 
     def reduceChannelDownloadConstraints(self, channelOptions: ChannelOptions, storage: PostStorage) -> Union[None, Tuple[ChannelOptions, bool]]:
