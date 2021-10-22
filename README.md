@@ -27,7 +27,6 @@ The minimal amount of required settings include server's address and appropriate
   "version": "0",
   "connection": {
     "hostname": "https://mattermost-server.com",
-    "usedApi": 4,
     "username": "user.name",
     "password": "swordfish",
     "token": "deadb33f"
