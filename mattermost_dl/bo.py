@@ -74,6 +74,9 @@ class Time:
         return self._time == other._time
     def __lt__(self, other: 'Time'):
         return self._time < other._time
+    # Needed to silence linter
+    def __gt__(self, other: 'Time'):
+        return self._time > other._time
 
     def __str__(self):
         fmt = datetime.fromtimestamp(self._time/1000).isoformat()
@@ -158,7 +161,7 @@ class JsonMessage:
         '''
         return NotImplemented
 
-    _T = TypeVar('_T', bound='JsonMessage', covariant=True)
+    _T = TypeVar('_T', bound='JsonMessage')
     @classmethod
     def fromStore(cls: Type[_T], info: dict) -> _T:
         misc = info['misc'] if 'misc' in info else {}
@@ -451,7 +454,7 @@ class Post(JsonMessage):
             p.updateTime = Time(x)
         # Last "visible edit" time (small updates after posting/public update are ignored)
         x = p.extract('edit_at')
-        if x != 0 and x != p.updateTime.timestamp:
+        if x != 0 and (p.updateTime is None or x != p.updateTime.timestamp):
             p.publicUpdateTime = Time(x)
         x = p.extract('delete_at')
         if x != 0:

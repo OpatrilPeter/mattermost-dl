@@ -216,14 +216,17 @@ class Saver:
         else:
             files = {}
 
-        if self.showProgressReport():
+        showProgressReport = self.showProgressReport()
+
+        if showProgressReport:
             reporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
                 header='Progress: ', footer=f'/{len(entities)} {entitiesName} (upper limit approximate)',
                 contentPadding=6, contentAlignLeft=False, updateIntervalMs=self.configfile.progressInterval)
             reporter.open()
             reporter.update('0')
         else:
-            reporter = None
+            # Reporter should be never accessed in this case, but we want clear type for linting
+            reporter = cast(progress.ProgressReporter, UnboundLocalError)
 
         for i, entity in enumerate(entities):
             filename = getFilenameFromEntity(entity)
@@ -243,9 +246,9 @@ class Saver:
                 url=url, filename=filename, directoryName=dirName,
                 suffix=suffix, redownload=redownload))
 
-            if self.showProgressReport():
+            if showProgressReport:
                 reporter.update(str(i+1))
-        if self.showProgressReport():
+        if showProgressReport:
             reporter.close()
         logging.info(f"Processed all {entitiesName}.")
 
@@ -433,6 +436,7 @@ class Saver:
         truncateArchive = options.redownload
 
         if not (emptyArchive or truncateArchive):
+            assert archiveHeader is not None # Redundant, for linter
             assert archiveHeader.storage is not None
 
             if options.postLimit > 0:
@@ -483,6 +487,8 @@ class Saver:
         archiveHeader: Optional[ChannelHeader] = None
         truncateData: bool = True
 
+        showProgressReport = self.showProgressReport()
+
         with open(headerFilename, 'r+' if headerExists else 'w', encoding='utf8') as headerFile:
             if headerExists:
                 try:
@@ -532,7 +538,7 @@ class Saver:
                     archiveHeader = None
 
             with open(postsFilename, 'w' if truncateData else 'a+', encoding='utf8') as output:
-                if self.showProgressReport():
+                if showProgressReport:
                     progressReporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
                         contentPadding=10, contentAlignLeft=False,
                         header='Progress: ', footer=f'/{estimatedPostLimit} posts (upper limit approximate)',
@@ -540,11 +546,14 @@ class Saver:
                     progressReporter.open()
                     progressReporter.update(f'0')
                 else:
-                    progressReporter = None
+                    # Reporter should be never accessed in this case, but we want clear type for linting
+                    progressReporter = cast(progress.ProgressReporter, UnboundLocalError)
 
                 takeEmojis: bool = options.emojiMetadata or options.downloadEmoji
 
                 def perPost(p: Post, hints: MattermostDriver.PostHints):
+                    assert header.storage is not None
+
                     header.usedUsers.add(self.driver.getUserById(p.userId))
                     if options.downloadAttachments:
                         for attachment in p.attachments:
@@ -573,12 +582,12 @@ class Saver:
                     header.storage.postIdAfterLast = hints.postIdAfter if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdBefore
 
                     header.storage.count += 1
-                    if self.showProgressReport():
+                    if showProgressReport:
                         progressReporter.update(str(header.storage.count))
 
                 self.driver.processPosts(processor=perPost, channel=channel, **params)
 
-                if self.showProgressReport():
+                if showProgressReport:
                     progressReporter.close()
                 logging.info('Processed all posts.')
 

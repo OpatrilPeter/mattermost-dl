@@ -279,7 +279,8 @@ class MattermostDriver:
         if channel:
             channelId = channel.id
         else:
-            channelId = self.context['channelId']
+            channelId = Id(self.context['channelId'])
+            channel = self.getChannelById(channelId)
 
         params: Dict[str, Any] = {
             'per_page': bufferSize
