@@ -10,11 +10,13 @@ from .jsonvalidation import validate as validateJson, formatValidationErrors
 from . import progress
 from .progress import ProgressSettings
 
+import argparse
 from collections.abc import Iterable
 import dataclasses
 import json
 from json.decoder import JSONDecodeError
 import jsonschema
+import traceback
 
 
 class LogVerbosity(Enum):
@@ -24,7 +26,7 @@ class LogVerbosity(Enum):
 
 class ConfigurationError(Exception):
     '''Invalid or missing configuration.'''
-    def __init__(self, filename: Path, *args):
+    def __init__(self, filename: Optional[Path] = None, *args):
         super().__init__(*args)
         self.filename = filename
 
@@ -193,8 +195,17 @@ class ConfigFile:
         with open(filename) as f:
             try:
                 config = json.load(f)
-            except JSONDecodeError as exc:
-                raise ConfigurationError(filename) from exc
+            except JSONDecodeError as err:
+                excInfo = sys.exc_info()
+                assert excInfo is not None
+                tbText = ''.join(traceback.format_tb(excInfo[2]))
+                reasonText = '' if len(
+                    str(err)) == 0 else f'Reason: {err}\n'
+                logging.error(
+                    f"Failed to load configuration file.\n{reasonText}Traceback:\n{tbText}")
+                del excInfo
+
+                raise ConfigurationError(filename) from err
 
             def onWarning(w):
                 logging.warning(f"Encountered warning '{w}', configuration may not be correctly loadable.")
@@ -217,11 +228,16 @@ class ConfigFile:
     @staticmethod
     def fromJson(config: dict) -> 'ConfigFile':
         self = cast(ConfigFile, ClassMock())
-        connection = config['connection']
-        self.hostname = connection['hostname']
-        self.username = connection['username']
-        self.password = connection.get('password', os.environ.get('MATTERMOST_PASSWORD', ''))
-        self.token = connection.get('token', os.environ.get('MATTERMOST_TOKEN', ''))
+        if 'connection' in config:
+            connection = config['connection']
+            if 'hostname' in connection:
+                self.hostname = connection['hostname']
+            if 'username' in connection:
+                self.username = connection['username']
+            if 'password' in connection:
+                self.password = connection['password']
+            if 'token' in connection:
+                self.token = connection['token']
 
         if 'throttling' in config:
             self.throttlingLoopDelay = config['throttling']['loopDelay']
@@ -298,5 +314,41 @@ class ConfigFile:
             self.downloadAllEmojis = True
 
         return ConfigFile(**self.__dict__)
+
+    def updateFromEnv(self):
+        env = os.environ
+        if 'MATTERMOST_SERVER' in env:
+            self.hostname = env['MATTERMOST_SERVER']
+        if 'MATTERMOST_USERNAME' in env:
+            self.username = env['MATTERMOST_USERNAME']
+        if 'MATTERMOST_PASSWORD' in env:
+            self.password = env['MATTERMOST_PASSWORD']
+        if 'MATTERMOST_TOKEN' in env:
+            self.token = env['MATTERMOST_TOKEN']
+
+    def updateFromArgs(self, args: argparse.Namespace):
+        if args.hostname is not None:
+            self.hostname = args.hostname
+        if args.username is not None:
+            self.username = args.username
+        if args.password is not None:
+            self.password = args.password
+        if args.token is not None:
+            self.token = args.token
+
+        assert 'verbosity' in args
+        if args.verbosity != LogVerbosity.Normal:
+            self.verbosity = args.verbosity
+
+    def validate(self):
+        '''
+            Delayed validation after loading configuration from all override sources.
+        '''
+        def require(name):
+            if getattr(self, name) == '':
+                logging.error(f'Required property \'{name}\' was not specified in config file nor on command line.')
+                raise ConfigurationError
+        require('hostname')
+        require('username')
 
 ConfigFile._schemaValidator = ConfigFile.loadSchemaValidator()

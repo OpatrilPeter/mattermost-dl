@@ -136,8 +136,7 @@
     }
   },
   "required": [
-    "version",
-    "connection"
+    "version"
   ],
   "properties": {
     "$schema": {
@@ -151,10 +150,6 @@
     "connection": {
       "description": "Contains all needed to set up a connection with the server.",
       "type": "object",
-      "required": [
-        "hostname",
-        "username"
-      ],
       "properties": {
         "hostname": {
           "description": "Mattermost server url used as prefix to api calls.",

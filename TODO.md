@@ -24,6 +24,3 @@
       - session limit hit
       - connection timeout
       - skipped due to refusing to delete archive
-- command line overrides
-	- output directory
-	- username/password/token/host

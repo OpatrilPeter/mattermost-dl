@@ -39,6 +39,18 @@ def parseArgs() -> ArgNamespace:
                            action='store_const', default=LogVerbosity.Normal, dest='verbosity')
     verbosity.add_argument(
         '--quiet', '-q', help='Quiet mode. Removes outputs if no problems occur.',  action='store_const', const=LogVerbosity.ProblemsOnly, dest='verbosity')
+
+    quickConf = argumentParser.add_argument_group()
+    quickConf.add_argument(
+        '--server', '-s', help="Mattermost server instance, like config setting 'connection.hostname'.", dest='hostname')
+    quickConf.add_argument(
+        '--user', '-u', help="Mattermost username, like config setting 'connection.username'.", dest='username')
+    quickConf.add_argument('--pass', '-p', help="Password to given account, like config setting 'connection.password'.\n"
+        + 'Not recommended to be set from command line for security reasons - prefer access tokens or at least passing through config file or env variable instead.',
+        dest='password')
+    quickConf.add_argument(
+        '--token', '-t', help="Mattermost access token, like config setting 'connection.token'.")
+
     args = argumentParser.parse_args()
     return args
 
@@ -73,10 +85,14 @@ def main():
 
     try:
         conffile = ConfigFile.fromFile(args.conf)
-        if args.verbosity != LogVerbosity.Normal:
-            conffile.verbosity = args.verbosity
+        conffile.updateFromEnv()
+        conffile.updateFromArgs(args)
+        conffile.validate()
     except ConfigurationError as err:
-        logging.fatal(f'Configuration file {err.filename} couldn\'t be loaded.')
+        if err.filename is not None:
+            logging.fatal(f'Configuration file {err.filename} failed to be be loaded.')
+        else:
+            logging.fatal(f'Configuration failed to be be loaded.')
         sys.exit(1)
     setupLogging(conffile.verbosity)
 

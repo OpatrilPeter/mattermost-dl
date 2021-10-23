@@ -28,13 +28,18 @@ The minimal amount of required settings include server's address and appropriate
   "connection": {
     "hostname": "https://mattermost-server.com",
     "username": "user.name",
-    "password": "swordfish",
+    // "password": "swordfish",
     "token": "deadb33f"
   }
 }
 ```
 
 Of these, either password or Mattermost access token may be provided. Token is preferred if possible - either make a permanent one if your permissions allow it or extract a session token from your conventional interactive session (such as the `MMAUTHTOKEN` cookie in a browser session).
+
+You may also specify/override those fields from following alternate sources in order of priority:
+
+- command line (run with `--help` for list of options)
+- environmental variables (see later section for list of supported ones)
 
 On default settings, all channels gets downloaded with unbounded history, so you may consider adding limits - recommended ways are:
 
@@ -46,6 +51,17 @@ On default settings, all channels gets downloaded with unbounded history, so you
 Full configuration options are described via configuration file's [JSON schema](mattermost_dl/config.schema.json).
 
 Contents are saved in a directory set by the `output.directory` setting (current working directory by default) - each channel gets stored in two files as described in next section, data files are stored in respective subdirectories.
+
+## Configuration examples
+
+TODO
+
+## Supported environmental variables
+
+- `MATTERMOST_SERVER`
+- `MATTERMOST_USERNAME`
+- `MATTERMOST_PASSWORD`
+- `MATTERMOST_TOKEN`
 
 ## Storage format
 
