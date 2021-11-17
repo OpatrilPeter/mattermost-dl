@@ -113,7 +113,7 @@ class JsonMessage:
         del self.misc[attrName]
         return res
 
-    def extract_or(self, attrName: str, fallback: Any) -> Any:
+    def extractOr(self, attrName: str, fallback: Any) -> Any:
         if attrName not in self.misc:
             return fallback
         res = self.extract(attrName)
@@ -233,7 +233,7 @@ class User(JsonMessage):
         x = u.extract('delete_at')
         if x != 0:
             u.deleteTime = Time(x)
-        x = u.extract_or('last_picture_update', 0)
+        x = u.extractOr('last_picture_update', 0)
         if x != 0 and x != u.createTime.timestamp:
             u.updateAvatarTime = Time(x)
         x = u.extract('position')
@@ -246,14 +246,26 @@ class User(JsonMessage):
         else:
             u.roles = x
 
+        x = u.extractOr('props', {})
+        x = {key: value
+            for key, value in x.items()
+                # Drop fields that are known to be unnecessary
+                # Notably, custom status is dropped as its ephemeral, while User info is mostly treated as constant in time
+                if (key not in ('customStatus',)
+                    and value != "")
+        }
+        if x:
+            u.misc['props'] = x
+
         # Things we explicitly don't care about
+        u.drop('auth_service')
+        u.drop('email')
+        u.drop('email_verified')
+        u.drop('disable_welcome_email')
+        u.drop('last_password_update')
         u.drop('locale')
         u.drop('timezone')
         u.drop('notify_props')
-        u.drop('email')
-        u.drop('email_verified')
-        u.drop('auth_service')
-        u.drop('last_password_update')
 
         u.cleanMisc()
         return cls(**u.__dict__)
@@ -459,13 +471,13 @@ class Post(JsonMessage):
         if x != 0:
             p.deleteTime = Time(x)
         # Parent post (if this post is a reply)
-        x = p.extract_or('parent_id', 0)
+        x = p.extractOr('parent_id', 0)
         if x:
             p.parentPostId = x
-        x = p.extract_or('root_id', 0)
+        x = p.extractOr('root_id', 0)
         if x and (not hasattr(p, 'parentPostId') or x != p.parentPostId):
             p.rootPostId = x
-        if p.extract_or('is_pinned', False):
+        if p.extractOr('is_pinned', False):
             p.isPinned = True
 
         x = p.extract('props')
@@ -601,6 +613,8 @@ class Channel(JsonMessage):
     header: Optional[str] = None
     purpose: Optional[str] = None
 
+    # How many messages are not replies
+    rootMessageCount: Optional[int] = None
     lastMessageTime: Optional[Time] = None
     members: List[User] = dataclassfield(default_factory=list)
 
@@ -633,6 +647,7 @@ class Channel(JsonMessage):
 
         ch.lastMessageTime = Time(ch.extract('last_post_at'))
         ch.messageCount = ch.extract('total_msg_count')
+        ch.rootMessageCount = ch.extractOr('total_msg_count_root', None)
         x = ch.extract('creator_id')
         if x:
             ch.creatorUserId = x
@@ -657,7 +672,7 @@ class Channel(JsonMessage):
     def memberFromStore(cls, memberName: str, jsonMemberValue: Any):
         if memberName in ('updateTime', 'deleteTime', 'lastMessageTime'):
             return Time(jsonMemberValue)
-        elif memberName in ('id', 'name', 'creatorUserId', 'header', 'purpose'):
+        elif memberName in ('id', 'name', 'creatorUserId', 'header', 'purpose', 'rootMessageCount'):
             return jsonMemberValue
         elif memberName == 'members':
             assert isinstance(jsonMemberValue, list)
@@ -728,7 +743,7 @@ class Team(JsonMessage):
         if x:
             t.description = x
 
-        x = t.extract_or('last_team_icon_update', 0)
+        x = t.extractOr('last_team_icon_update', 0)
         if x != 0 and x != t.createTime.timestamp:
             t.updateAvatarTime = Time(x)
 

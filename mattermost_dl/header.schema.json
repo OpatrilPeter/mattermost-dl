@@ -78,6 +78,11 @@
                     "description": "Short synopsis of channel's purpose.",
                     "type": "string"
                 },
+                "rootMessageCount": {
+                    "description": "How many messages in the channel are root messages, i.e. not replies to other posts.",
+                    "type": "integer",
+                    "minimum": 0
+                },
                 "lastMessageTime": {
                     "description": "Time of the creation for the latest post, in miliseconds sinde 1970-01-01.",
                     "type": "integer"

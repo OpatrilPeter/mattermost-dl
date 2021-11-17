@@ -23,4 +23,3 @@
       - session limit hit
       - connection timeout
       - skipped due to refusing to delete archive
-- consider (lack of) support for custom statuses
