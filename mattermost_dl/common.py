@@ -3,6 +3,7 @@
 '''
 
 from copy import copy
+import dataclasses
 from dataclasses import dataclass, field as dataclassfield
 import enum
 from enum import Enum, auto as enumerator
@@ -11,9 +12,10 @@ import os
 from pathlib import Path
 import re
 import sys
+import traceback
 from typing import (
     Any, BinaryIO, Callable, cast, ClassVar,
-    Collection, Dict, Iterable, List, NewType, NoReturn,
+    Collection, Dict, Iterable, Generator, List, NewType, NoReturn,
     Optional, Set, Sized, TextIO, Tuple, Type, TypeVar, Union
 )
 
@@ -35,3 +37,18 @@ class ClassMock:
         ```
     '''
     pass
+
+def exceptionFormatter(reason: str) -> str:
+    '''
+        Returns multiline string describing currently caught exception.
+        Takes higher level problem description.
+
+        Should be executed during exception handling, i.e. in except block or subfunction within.
+    '''
+    excInfo = sys.exc_info()
+    assert excInfo is not None
+    tbText = ''.join(traceback.format_tb(excInfo[2]))
+    exceptionText = str(excInfo[1])
+    if len(exceptionText):
+        exceptionText = f'Exception: {exceptionText}\n'
+    return f"{reason}\n{exceptionText}Traceback:\n{tbText}"

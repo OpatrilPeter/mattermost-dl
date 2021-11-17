@@ -54,7 +54,7 @@ Contents are saved in a directory set by the `output.directory` setting (current
 
 ## Configuration examples
 
-TODO
+TODO: _Concrete examples will be added later._
 
 ## Supported environmental variables
 
@@ -96,12 +96,16 @@ Notably,
 Code is written in statically typed Python 3.7+.
 
 As this is a one-time side project and Mattermost's API availabilty is fundamentally ephemeral, the code isn't tested to rigorous "production-ready" standards.
+In particular, many combinations of configuration options are not tested enough and would benefit from proper unit tests and/or whole program tests with mocked REST endpoints.
 
-Additionally, I've opted for some design choices not usual for Python code, such as
+Additionally, as this project served as personal evaluation of coding styles, I've opted for some design choices not usual for Python code, such as:
 
 - camel case / lowercase naming convention
 - common prelude over explicit imports everywhere
 - prefer handling (reporting) problem context locally over creating exceptions with complex payloads
+- do not typically name private methods with prefix underscore - rationale is decreased readibility that isn't worth it, especially as this module is not primarily intended to be library.
+  The only methods that ought to be marked private would be those that could break class invariants. Usage of the class ought to be still clear, though, documented in class if needed
+- line wrapping is capped on around 110 as a soft limit, actual wrapping is judged on case-by-case basis
 
 ## References
 

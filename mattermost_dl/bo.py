@@ -25,7 +25,6 @@ from .jsonvalidation import validate as validateJson, formatValidationErrors
 from . import jsonvalidation
 
 from collections.abc import Iterable
-import dataclasses
 from datetime import datetime
 from functools import total_ordering
 import json
@@ -541,7 +540,7 @@ class Post(JsonMessage):
                     logging.error(f"Failed to load post, loaded json object has unsupported type {e.recieved}.")
                 else:
                     assert isinstance(e, Iterable)
-                    logging.error("Configuration didn't match expected schema. " + formatValidationErrors(e))
+                    logging.error("Post didn't match expected schema. " + formatValidationErrors(e))
                 raise StoreError
             onError = onErrorDefault
         validateJson(info, cls._schemaValidator, acceptedVersion='0', onWarning=onWarning, onError=onError)

@@ -9,10 +9,10 @@ from . import jsonvalidation
 from .jsonvalidation import validate as validateJson, formatValidationErrors
 from . import progress
 from .progress import ProgressSettings
+from .recovery_actions import RBackup, RDelete, RReuse, RSkipDownload
 
 import argparse
 from collections.abc import Iterable
-import dataclasses
 import json
 from json.decoder import JSONDecodeError
 import jsonschema
@@ -42,7 +42,8 @@ class ChannelOptions:
     postsAfterTime: Optional[Time] = None
     postLimit: int = -1 # 0 is allowed and fetches only channel metadata
     postSessionLimit: int = -1 # 0 is allowed and fetches only channel metadata
-    redownload: bool = False
+    onExistingCompatibleArchive: Union[RBackup, RDelete, RReuse, RSkipDownload] = RReuse()
+    onExistingIncompatibleArchive: Union[RBackup, RDelete, RSkipDownload] = RBackup()
     downloadTimeDirection: OrderDirection = OrderDirection.Asc
     downloadAttachments: bool = False
     downloadAttachmentTypes: List[str] = dataclassfield(default_factory=list)
@@ -58,15 +59,31 @@ class ChannelOptions:
         self.postsAfterId = info.get('afterPost', self.postsAfterId)
 
         x = info.get('beforeTime', None)
-        if x:
+        if x is not None:
             self.postsBeforeTime = Time(x)
         x = info.get('afterTime', None)
-        if x:
+        if x is not None:
             self.postsAfterTime = Time(x)
 
         self.postLimit = info.get('maximumPostCount', self.postLimit)
         self.postSessionLimit = info.get('sessionPostLimit', self.postSessionLimit)
-        self.redownload = info.get('redownload', self.redownload)
+
+        x = info.get('onExistingCompatible', None)
+        if x is not None:
+            self.onExistingCompatibleArchive = {
+                'backup': RBackup(),
+                'delete': RDelete(),
+                'skip': RSkipDownload(),
+                'update': RReuse(),
+            }.get(x, self.onExistingCompatibleArchive)
+        x = info.get('onExistingIncompatible', None)
+        if x is not None:
+            self.onExistingIncompatibleArchive = {
+                'backup': RBackup(),
+                'delete': RDelete(),
+                'skip': RSkipDownload(),
+            }.get(x, self.onExistingIncompatibleArchive)
+
         x = info.get('downloadFromOldest', None)
         if x is not None:
             self.downloadTimeDirection = OrderDirection.Asc if x else OrderDirection.Desc
@@ -196,15 +213,7 @@ class ConfigFile:
             try:
                 config = json.load(f)
             except JSONDecodeError as err:
-                excInfo = sys.exc_info()
-                assert excInfo is not None
-                tbText = ''.join(traceback.format_tb(excInfo[2]))
-                reasonText = '' if len(
-                    str(err)) == 0 else f'Reason: {err}\n'
-                logging.error(
-                    f"Failed to load configuration file.\n{reasonText}Traceback:\n{tbText}")
-                del excInfo
-
+                logging.error(exceptionFormatter('Failed to load configuration file.'))
                 raise ConfigurationError(filename) from err
 
             def onWarning(w):

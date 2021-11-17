@@ -91,6 +91,7 @@
             "description": "Information about the message storage's contents.",
             "type": "object",
             "required": [
+                "byteSize",
                 "count",
                 "organization"
             ],
@@ -110,6 +111,11 @@
                         "AscendingContinuous",
                         "DescendingContinuous"
                     ]
+                },
+                "byteSize": {
+                    "description": "Size of the data file in bytes, useful for detecting file desync and rollback of append-only modification.",
+                    "type": "integer",
+                    "minimum": 0
                 },
                 "beginTime": {
                     "description": "Start of the time range covered by the storage, in miliseconds since 1970-01-01. For example, in AscendingContinuous organization, begin time of 2000-01-01T00:00:00 would mean any posts after that time point are covered.",

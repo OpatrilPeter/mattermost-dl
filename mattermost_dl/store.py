@@ -6,17 +6,21 @@
         - contains json equivalent of ChannelHeader
     channelname.data.json
         - contains newline separated sequence of compact json serializations of Post
-        - posts are ordered by timestamp and should be continous
+        - posts are ordered by timestamp and should be continous (precise ordering is specified in header)
 '''
 
-from .bo import *
 from .common import *
+
+from .bo import *
+from .config import ChannelOptions, OrderDirection
+from .driver import MattermostDriver
 from .jsonvalidation import validate as validateJson, formatValidationErrors
 from . import jsonvalidation
-from collections.abc import Iterable
 
+from collections.abc import Iterable
 import json
 import jsonschema
+from os import stat_result
 # HACK: Pyright linter doesn't recognize special meaning of ClassVar from .common in dataclasses
 from typing import ClassVar
 
@@ -48,12 +52,13 @@ class PostOrdering(Enum):
 @dataclass
 class PostStorage(JsonMessage):
     '''
-        Note that if count == 0, other fields do not hold meaningful values.
+        Note that if count == 0, other fields do not have to hold meaningful values.
     '''
 
     # Number of posts
     count: int = 0
     organization: PostOrdering = PostOrdering.Unsorted
+    byteSize: int = 0
     # If the first post is not completely first, here is post that we known to be before it (respecting ordering)
     postIdBeforeFirst: Optional[Id] = None
     # Create time of first post in the storage or some time point before it, if there are no posts up to that
@@ -66,14 +71,50 @@ class PostStorage(JsonMessage):
     postIdAfterLast: Optional[Id] = None
 
     @staticmethod
-    def empty() -> 'PostStorage':
-        return PostStorage(misc={})
+    def fromOptions(options: ChannelOptions) -> 'PostStorage':
+        '''
+            Constructs fresh, partially initialized storage suitable
+            for incremental filling by `addSortedPost`, followed
+            by correcting the byteSize.
+        '''
+        storage = PostStorage(misc={})
+        if options.downloadTimeDirection == OrderDirection.Asc:
+            storage.organization = PostOrdering.AscendingContinuous
 
-    def extend(self, other: 'PostStorage'):
+            if options.postsAfterTime is not None:
+                storage.beginTime = options.postsAfterTime
+        else:
+            assert options.downloadTimeDirection == OrderDirection.Desc
+            storage.organization = PostOrdering.DescendingContinuous
+
+            if options.postsBeforeTime is not None:
+                storage.beginTime = options.postsBeforeTime
+        return storage
+
+
+    def addSortedPost(self, p: Post, postOrderHints: MattermostDriver.PostHints, ordering: OrderDirection):
+        if self.count == 0:
+            self.firstPostId = p.id
+            if self.beginTime == Time(0):
+                self.beginTime = p.createTime
+            self.postIdBeforeFirst = postOrderHints.postIdBefore if ordering == OrderDirection.Asc else postOrderHints.postIdAfter
+        self.lastPostId = p.id
+        self.endTime = p.createTime
+        self.postIdAfterLast = postOrderHints.postIdAfter if ordering == OrderDirection.Asc else postOrderHints.postIdBefore
+
+        self.count += 1
+
+
+    def update(self, other: 'PostStorage'):
+        '''
+            Updates old post storage with freshly downloaded content.
+            Does not represent concatenation of arbitrary storages.
+        '''
         assert other.organization == self.organization
         if other.count > 0:
             assert self.lastPostId == other.postIdBeforeFirst
             self.count += other.count
+            self.byteSize = other.byteSize
             self.lastPostId = other.lastPostId
             self.endTime = other.endTime
             self.postIdAfterLast = other.postIdAfterLast
@@ -92,6 +133,7 @@ class ChannelHeader:
     channel: Channel
     team: Optional[Team] = None  # Missing if channel is not scoped under team
     # Missing if channel has no messages, so `storage.count > 0` shall hold
+    # (as long as header is not currently getting filled)
     storage: Optional[PostStorage] = None
     # Users that appeared in conversations
     usedUsers: Set[User] = dataclassfield(default_factory=set)
@@ -114,7 +156,7 @@ class ChannelHeader:
                 logging.error(f"Failed to load channel header, loaded json object has unsupported type {e.recieved}.")
             else:
                 assert isinstance(e, Iterable)
-                logging.error("Configuration didn't match expected schema. " + formatValidationErrors(e))
+                logging.error("Channel header didn't match expected schema. " + formatValidationErrors(e))
             raise StoreError
         info = validateJson(info, cls._schemaValidator,
                             acceptedVersion='0', onWarning=onWarning, onError=onError)
@@ -143,7 +185,7 @@ class ChannelHeader:
             self.team = other.team
         if other.storage is not None:
             if self.storage is not None:
-                self.storage.extend(other.storage)
+                self.storage.update(other.storage)
             else:
                 self.storage = copy(other.storage)
         self.usedUsers = other.usedUsers | self.usedUsers
@@ -171,3 +213,33 @@ class ChannelHeader:
             return jsonschema.Draft7Validator(json.load(schemaFile))
 
 ChannelHeader._schemaValidator = ChannelHeader.loadSchemaValidator()
+
+@dataclass
+class ChannelFileInfo:
+    '''
+        Represents information about stored channel archive.
+
+        Contains file stats for header and data (posts containg) file, useful mainly for
+        checking that files weren't modified since they were read from.
+    '''
+    header: ChannelHeader
+    headerFileStats: stat_result
+    dataFileStats: Optional[stat_result] = None
+
+    @classmethod
+    def load(cls, channel: Channel, headerFilename: Path, dataFilename: Path) -> Optional['ChannelFileInfo']:
+        '''
+            Attempts to load channel header, without validation of the posts storage.
+        '''
+        if not headerFilename.is_file():
+            return None
+
+        headerStat = headerFilename.stat()
+        dataStat = dataFilename.stat() if dataFilename.is_file() else None
+
+        with open(headerFilename, 'r', encoding='utf8') as headerFile:
+            try:
+                return ChannelFileInfo(ChannelHeader.fromStore(json.load(headerFile)), headerStat, dataStat)
+            except Exception:
+                logging.warning(exceptionFormatter(f"Unable to load existing metadata for channel '{channel.internalName}'."))
+                return None

@@ -8,7 +8,6 @@
 
 ### feat
 
-- safety mode - do not trim archive without confirmation (redownload or interactive ask) - if trim is needed channel download fails
 - more info messages
   - downloaded messages that are skipped on filter conditions move progress
   - gentler recovery/more informative error handling
@@ -24,3 +23,4 @@
       - session limit hit
       - connection timeout
       - skipped due to refusing to delete archive
+- consider (lack of) support for custom statuses

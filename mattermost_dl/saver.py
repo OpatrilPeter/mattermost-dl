@@ -2,16 +2,17 @@
     Contains high level logic of history downloading
 '''
 
-from .bo import *
 from .common import *
+
+from .bo import *
 from .config import ChannelOptions, ConfigFile, GroupChannelSpec, LogVerbosity, OrderDirection, TeamSpec
 from .driver import MattermostDriver
 from . import progress
-from .store import ChannelHeader, PostOrdering, PostStorage
+from .recovery import RReuse, RecoveryArbiter, RBackup, RDelete, RSkipDownload
+from .store import ChannelFileInfo, ChannelHeader, PostOrdering, PostStorage
 
 import json
 from mimetypes import guess_extension
-import traceback
 
 @dataclass
 class ChannelRequest:
@@ -26,11 +27,16 @@ class Saver:
         Main class responsible for orchestrating the downloading process.
         Should start from __call__ method.
     '''
-    def __init__(self, configfile: ConfigFile, driver: Optional[MattermostDriver] = None):
-        if not driver:
+    def __init__(self, configfile: ConfigFile, driver: Optional[MattermostDriver] = None,
+            recoveryArbiter: Optional[RecoveryArbiter] = None
+            ):
+        if driver is None:
             driver = MattermostDriver(configfile)
+        if recoveryArbiter is None:
+            recoveryArbiter = RecoveryArbiter(configfile)
         self.configfile = configfile
         self.driver: MattermostDriver = driver
+        self.recoveryArbiter: RecoveryArbiter = recoveryArbiter
         self.user: User # Conveniency, fetched on call
 
     def jsonDumpToFile(self, obj, fp):
@@ -318,16 +324,15 @@ class Saver:
         return (self.configfile.verbosity == LogVerbosity.Normal
             and self.configfile.reportProgress.mode != progress.VisualizationMode.DumbTerminal)
 
-    def reduceChannelDownloadConstraints(self, channelOptions: ChannelOptions, storage: PostStorage) -> Union[None, Tuple[ChannelOptions, bool]]:
+    def reduceChannelDownloadConstraints(self, channelOptions: ChannelOptions, storage: PostStorage) -> Union[bool, ChannelOptions]:
         '''
             Updates constraints in channel options based on what's already downloaded in archive.
 
             @param storage archive's storage
             @returns either
-                - None if no download is necessary
-                - pair of updated ChannelOptions and trimArchive flag
-
-            TODO: in case of trimming, shouldn't return ChannelOptions => should return DoNothing, TrimArchive, ChannelOptions
+                - False if no download is necessary
+                - True if download should be done from scratch (and thus no reducing happens)
+                - updated ChannelOptions
         '''
 
         options = copy(channelOptions)
@@ -337,7 +342,7 @@ class Saver:
             if options.postsAfterTime is not None:
                 if (options.postsAfterTime < storage.beginTime and storage.postIdBeforeFirst is not None
                     or options.postsAfterTime > storage.endTime):
-                    return options, True
+                    return True
             if options.postsAfterId is not None:
                 if options.postsAfterId == storage.firstPostId:
                     options.postsAfterId = storage.lastPostId
@@ -353,23 +358,23 @@ class Saver:
             if options.postsBeforeId is not None:
                 if (options.postsBeforeId == storage.firstPostId
                     or options.postsBeforeId == storage.lastPostId):
-                    return None
+                    return False
                 else:
                     postTime = self.driver.getPostById(options.postsBeforeId).createTime
                     options.postsBeforeTime = postTime if options.postsBeforeTime is None else max(postTime, options.postsBeforeTime)
             if options.postsBeforeTime is not None:
                 if options.postsBeforeTime < storage.beginTime:
                     if storage.postIdBeforeFirst is None:
-                        return None
+                        return False
                     else:
-                        return channelOptions, True
+                        return True
                 # In archive
                 elif options.postsBeforeTime <= storage.endTime:  # type: ignore
-                    return None
+                    return False
                 else:
                     if options.postsBeforeTime > options.postsAfterTime: # type: ignore
-                        return None
-            return options, False
+                        return False
+            return options
 
         else: # options.downloadTimeDirection == OrderDirection.Desc
             # Mirrored all conditions from above branch in other time direction
@@ -377,7 +382,7 @@ class Saver:
             if options.postsBeforeTime is not None:
                 if (options.postsBeforeTime > storage.beginTime and storage.postIdBeforeFirst is not None
                     or options.postsBeforeTime < storage.endTime):
-                    return options, True
+                    return True
             if options.postsBeforeId is not None:
                 if options.postsBeforeId == storage.firstPostId:
                     options.postsBeforeId = storage.lastPostId
@@ -393,31 +398,31 @@ class Saver:
             if options.postsAfterId is not None:
                 if (options.postsAfterId == storage.firstPostId
                     or options.postsAfterId == storage.lastPostId):
-                    return None
+                    return False
                 else:
                     postTime = self.driver.getPostById(options.postsAfterId).createTime
                     options.postsAfterTime = postTime if options.postsAfterTime is None else min(options.postsAfterTime, postTime)
             if options.postsAfterTime is not None:
                 if options.postsAfterTime > storage.beginTime:
                     if storage.postIdBeforeFirst is None:
-                        return None
+                        return False
                     else:
-                        return channelOptions, True
+                        return True
                 # In archive
                 elif options.postsAfterTime >= storage.endTime: # type: ignore
-                    return None
+                    return False
                 else:
                     if options.postsAfterTime > options.postsBeforeTime: # type: ignore
-                        return None
+                        return False
 
-            return options, False
+            return options
 
     def getChannelDownloaderParams(self, options: ChannelOptions, archiveHeader: Optional[ChannelHeader],
             lastChannelMessageTime: Optional[Time]
         ) -> Union[None, Tuple[bool, Dict[str, Any]]]:
         '''
             Returns params suitable for MattermostDriver's post downloading
-            and indicator whether current archive content is suitable for appending.
+            and indicator whether current archive content is unsuitable for appending (requiring creation of archive from scratch).
             If archive's channel header indicates that all required posts are already present, returns None.
         '''
         params: Dict[str, Any] = {
@@ -433,9 +438,9 @@ class Saver:
                 params.update(maxCount=min(options.postLimit, options.postSessionLimit))
 
         emptyArchive = archiveHeader is None or archiveHeader.storage is None
-        truncateArchive = options.redownload
+        truncateArchive = emptyArchive
 
-        if not (emptyArchive or truncateArchive):
+        if not truncateArchive:
             assert archiveHeader is not None # Redundant, for linter
             assert archiveHeader.storage is not None
 
@@ -449,19 +454,21 @@ class Saver:
             if newOrganization != archiveHeader.storage.organization:
                 truncateArchive = True
             else:
-                optionsPack = self.reduceChannelDownloadConstraints(options, archiveHeader.storage)
-                if optionsPack is None:
-                    return None
-                options, truncateArchiveTmp = optionsPack
-                if truncateArchiveTmp:
-                    truncateArchive = True
+                opts = self.reduceChannelDownloadConstraints(options, archiveHeader.storage)
+                if isinstance(opts, bool):
+                    if opts:
+                        truncateArchive = True
+                    else:
+                        return None
+                else:
+                    assert isinstance(opts, ChannelOptions)
+                    options = opts
 
             if not truncateArchive and lastChannelMessageTime is not None:
                 if archiveHeader.storage.organization in (PostOrdering.Ascending, PostOrdering.AscendingContinuous):
                     if archiveHeader.storage.endTime >= lastChannelMessageTime: # type: ignore
                         return None
 
-        # Handling of empty (or about-to-be-truncated) archive
         if options.postsAfterId:
             params.update(afterPost=options.postsAfterId)
         elif options.postsAfterTime:
@@ -475,70 +482,242 @@ class Saver:
 
         return truncateArchive, params
 
+    def makeArchiveFilenames(self, stem: str) -> Tuple[Path, Path]:
+        '''
+            Helper that returns pair of filenames for header and data file of channel archive
+        '''
+        return (
+            self.configfile.outputDirectory / (stem + '.meta.json'),
+            self.configfile.outputDirectory / (stem + '.data.json')
+        )
+
+    def getUnusedArchiveBackupFilenames(self, backupAlternatives: Generator[str, None, None]) -> Tuple[Path, Path]:
+        while True:
+            fname = next(backupAlternatives)
+            headerFname, dataFname = self.makeArchiveFilenames(fname)
+            if not headerFname.is_file() and not dataFname.is_file():
+                return headerFname, dataFname
+
+    def backupArchive(self, channel: Channel, channelOutfile: str,
+            backupOutfile: str, backupAlternatives: Generator[str, None, None],
+            headerOnly: bool = False
+        ) -> Union[None, RSkipDownload]:
+        '''
+            Backups existing archive of selected filename by renaming it.
+            Header only mode, as name suggests, backs only header file. This is efficient if data file gets changed in write-only way,
+            as it allows to recover the data file by trimming it to original size (preserved in header).
+            Consults arbiter on overwrites of existing backups  - if the chosen action is to not lose anything and not creating redundant data,
+            RSkipDownload is returned.
+
+            Outfile parameters represent root of the channel's name, without suffixes.
+            `backupAlternatives` shall yield alternate backup outfile.
+        '''
+
+        headerFname, dataFname = self.makeArchiveFilenames(channelOutfile)
+        headerBackupFname, dataBackupFname = self.makeArchiveFilenames(backupOutfile)
+
+        headerExist = headerFname.is_file()
+        dataExist = dataFname.is_file()
+
+        if not headerExist and (headerOnly or not dataExist):
+            return None
+
+        # Backups already exist
+        if headerBackupFname.is_file() or dataBackupFname.is_file():
+            opts = self.recoveryArbiter.onExistingChannelBackup(channel, headerBackupFname, dataBackupFname)
+            if isinstance(opts, RSkipDownload):
+                return opts
+            elif isinstance(opts, RDelete):
+                if headerBackupFname.is_file():
+                    headerBackupFname.unlink()
+                if dataBackupFname.is_file():
+                    dataBackupFname.unlink()
+            else:
+                assert opts == RBackup()
+                headerAltBackupFname, dataAltBackupFname = self.getUnusedArchiveBackupFilenames(backupAlternatives)
+                if headerBackupFname.is_file():
+                    headerBackupFname.rename(headerAltBackupFname)
+                if dataBackupFname.is_file():
+                    dataBackupFname.rename(dataAltBackupFname)
+
+        if headerExist:
+            headerFname.rename(headerBackupFname)
+        if not headerOnly and dataExist:
+            dataFname.rename(dataBackupFname)
+
+        return None
+
+    def restoreArchiveBackup(self, channelOutfile: str, backupOutfile: str, oldDataFileSize: Optional[int] = None):
+        '''
+            Replaces current state of the archive of given name from existing backup.
+
+            Outfile parameters represent root of the channel's name, without suffixes.
+
+            Expects one of following scenarios:
+            - rollbacked from-scratch download
+                Current state is already fully deleted. Backup replaces it
+            - rollbacked appending download
+                Current state contains only post storage. Backup contains only header
+                and corrects the size of the storage. The corret size is already known
+                and passed through `oldPostSize` parameter
+        '''
+
+        headerFname, dataFname = self.makeArchiveFilenames(channelOutfile)
+        headerBackupFname, dataBackupFname = self.makeArchiveFilenames(backupOutfile)
+
+        assert headerBackupFname.is_file() and not headerFname.is_file()
+        if dataBackupFname.is_file():
+            assert not dataFname.is_file()
+            dataBackupFname.rename(dataFname)
+            headerBackupFname.rename(headerFname)
+        else:
+            assert dataFname.is_file() and oldDataFileSize is not None
+            os.truncate(dataFname, oldDataFileSize)
+            headerBackupFname.rename(headerFname)
+
+    def loadPreviousChannelArchive(self, channel: Channel, headerFilename: Path, dataFilename: Path
+        ) -> Union[ChannelFileInfo, RBackup, RDelete, RSkipDownload]:
+        '''
+            Loads all data about possible previously downloaded channel archive
+            in preparation of new download and decides how to replace the previous content.
+
+            @returns ChannelFileInfo if archive exists, can be loaded successfully and
+                is suitable for reuse.
+                Otherwise, returns one of recovery strategies of previous content:
+                    - RBackup - previous content shall be backed up.
+                    - RDelete - previous content shall be deleted.
+                    - RSkipDownload - previous content shall be preserved, download is cancelled.
+        '''
+
+        headerInfo = ChannelFileInfo.load(channel, headerFilename, dataFilename)
+        if headerInfo is None:
+            return self.recoveryArbiter.onUnloadableHeader(channel, headerFilename, dataFilename)
+        archiveHeader, dataFileStats = headerInfo.header, headerInfo.dataFileStats
+
+        # Check whether post storage file matches header
+        if archiveHeader.storage is not None:
+            if dataFileStats is None:
+                if archiveHeader.storage.byteSize > 0: # File may be missing if it would be empty
+                    opts = self.recoveryArbiter.onMissizedDataFile(
+                        archiveHeader, dataFilename=dataFilename, size=None)
+                    assert isinstance(opts, (RBackup, RDelete, RSkipDownload))
+                    return opts
+            else:
+                if archiveHeader.storage.byteSize != dataFileStats.st_size:
+                    opts = self.recoveryArbiter.onMissizedDataFile(
+                        archiveHeader, dataFilename=dataFilename, size=dataFileStats.st_size)
+                    if isinstance(opts, (RBackup, RDelete, RSkipDownload)):
+                        return opts
+                    else:
+                        assert isinstance(opts, RReuse) # Correcting previous downloads
+                        assert archiveHeader.storage.byteSize < dataFileStats.st_size
+                        os.truncate(dataFilename, archiveHeader.storage.byteSize)
+        else:
+            if dataFileStats is not None: # Unexpected data file
+                opts = self.recoveryArbiter.onMissizedDataFile(
+                    archiveHeader, dataFilename=dataFilename, size=dataFileStats.st_size)
+                if isinstance(opts, (RBackup, RDelete, RSkipDownload)):
+                    return opts
+
+        return headerInfo
+
+    def processChannelAuxiliaries(self, channelOutfile: str, header: ChannelHeader, options: ChannelOptions, usedAttachments: List[FileAttachment]):
+        '''Fetches additional data beside posts for given channel.'''
+        if options.emojiMetadata:
+            for emoji in header.usedEmojis:
+                self.enrichEmoji(emoji)
+        if options.downloadEmoji and not self.configfile.downloadAllEmojis:
+            self.processEmoji('emojis', emojis=header.usedEmojis)
+
+        if options.downloadAttachments and len(usedAttachments) > 0:
+            self.processAttachments(channelOutfile+'--files', channelOpts=options, attachments=usedAttachments)
+
+        if options.downloadAvatars:
+            self.processAvatars('avatars', users=header.usedUsers)
+
+
     def processChannel(self, channelOutfile: str, header: ChannelHeader, channelRequest: ChannelRequest):
         channel, options = channelRequest.metadata, channelRequest.config
 
-        headerFilename = self.configfile.outputDirectory / (channelOutfile + '.meta.json')
-        postsFilename = self.configfile.outputDirectory / (channelOutfile + '.data.json')
-
-        attachments: List[FileAttachment] = []
-
-        headerExists = headerFilename.is_file()
-        archiveHeader: Optional[ChannelHeader] = None
-        truncateData: bool = True
-
+        headerFilename, dataFilename = self.makeArchiveFilenames(channelOutfile)
         showProgressReport = self.showProgressReport()
 
-        with open(headerFilename, 'r+' if headerExists else 'w', encoding='utf8') as headerFile:
-            if headerExists:
-                try:
-                    archiveHeader = ChannelHeader.fromStore(json.load(headerFile))
-                    truncateData = False
-                except Exception as err:
-                    excInfo = sys.exc_info()
-                    assert excInfo is not None
-                    tbText = ''.join(traceback.format_tb(excInfo[2]))
-                    reasonText = '' if len(str(err)) == 0 else f'Reason: {err}\n'
-                    logging.warning(f"Unable to load previously saved metadata for channel {channel.internalName}, generating from scratch.\n{reasonText}Traceback:\n{tbText}")
-                    del excInfo
+        def backupAltNames() -> Generator[str, None, None]:
+            '''Yields alternative filenames for archive backups.'''
+            i = 1
+            while True:
+                yield f'{channelOutfile}--backup~{i}'
+                i += 1
 
-            if options.postLimit == 0 or options.postSessionLimit == 0:
-                return # Early exit - nothing downloaded, no need to touch header
+        if options.postLimit == 0 or options.postSessionLimit == 0:
+            return # Early exit - nothing downloaded, no need to touch header
 
-            # Used for display
-            estimatedPostLimit: int = channel.messageCount
-            if options.postLimit != -1:
-                estimatedPostLimit = min(estimatedPostLimit, options.postLimit)
-            if options.postSessionLimit != -1:
-                estimatedPostLimit = min(estimatedPostLimit, options.postSessionLimit)
+        paramPack = self.loadPreviousChannelArchive(channel, headerFilename, dataFilename)
+        if isinstance(paramPack, ChannelFileInfo):
+            archiveFileInfo = paramPack
+            archiveRecoveryStrategy = RReuse()
+        else:
+            archiveFileInfo = None
+            archiveRecoveryStrategy = paramPack
 
-            header.storage = PostStorage.empty()
-            if options.downloadTimeDirection == OrderDirection.Asc:
-                header.storage.organization = PostOrdering.AscendingContinuous
+        if isinstance(archiveRecoveryStrategy, RSkipDownload):
+            return
+        elif isinstance(archiveRecoveryStrategy, RDelete):
+            if headerFilename.is_file():
+                headerFilename.unlink()
+            if dataFilename.is_file():
+                dataFilename.unlink()
+        elif isinstance(archiveRecoveryStrategy, RBackup):
+            if self.backupArchive(channel, channelOutfile, channelOutfile+'--backup', backupAltNames()) == RSkipDownload():
+                return
+
+        header.storage = PostStorage.fromOptions(options)
+
+        paramPack = self.getChannelDownloaderParams(options=options,
+            archiveHeader=archiveFileInfo.header if archiveFileInfo is not None else None,
+            lastChannelMessageTime=channel.lastMessageTime
+        )
+        if paramPack is None:
+            return # Early exit - we don't need to download anything
+        fromScratch, dlParams = paramPack
+
+        if archiveFileInfo is not None:
+            assert isinstance(archiveRecoveryStrategy, RReuse)
+
+            opts = self.recoveryArbiter.onArchiveReuse(archiveFileInfo.header, options, reusable=not fromScratch)
+
+            if isinstance(opts, RSkipDownload):
+                return
+            elif isinstance(opts, RDelete):
+                if headerFilename.is_file():
+                    headerFilename.unlink()
+                if dataFilename.is_file():
+                    dataFilename.unlink()
+                archiveFileInfo = None
+            elif isinstance(opts, RBackup):
+                if self.backupArchive(channel, channelOutfile, channelOutfile+'--backup', backupAltNames()) == RSkipDownload():
+                    return
+                archiveFileInfo = None
             else:
-                assert options.downloadTimeDirection == OrderDirection.Desc
-                header.storage.organization = PostOrdering.DescendingContinuous
+                assert isinstance(opts, RReuse)
+                # Old header is backed up for rollback
+                if self.backupArchive(channel, channelOutfile, channelOutfile+'--backup', backupAltNames(), headerOnly=not fromScratch) == RSkipDownload():
+                    return
 
-            paramPack = self.getChannelDownloaderParams(options=options, archiveHeader=archiveHeader,
-                lastChannelMessageTime=channel.lastMessageTime
-            )
-            if paramPack is None:
-                return # Early exit - we didn't download anyting, no need to touch header
-            truncateDataTmp, params = paramPack
-            if truncateDataTmp:
-                truncateData = True
+        # By now, header file shouldn't exist and posts file should exist only if we're planning to append
+        archiveHeader = archiveFileInfo.header if archiveFileInfo is not None else None
 
-            if headerExists:
-                # We delete header before we start downloading to ensure header content is consistent if download gets interrupted
-                headerFile.seek(0)
-                headerFile.truncate()
+        try:
+            attachments: List[FileAttachment] = []
 
-                if truncateData and archiveHeader is not None:
-                    # We're dropping old archive, so we can drop old header, too
-                    archiveHeader = None
-
-            with open(postsFilename, 'w' if truncateData else 'a+', encoding='utf8') as output:
+            with open(dataFilename, 'w' if fromScratch else 'a', encoding='utf8') as output:
                 if showProgressReport:
+                    estimatedPostLimit: int = channel.messageCount
+                    if options.postLimit != -1:
+                        estimatedPostLimit = min(estimatedPostLimit, options.postLimit)
+                    if options.postSessionLimit != -1:
+                        estimatedPostLimit = min(estimatedPostLimit, options.postSessionLimit)
+
                     progressReporter = progress.ProgressReporter(sys.stderr, settings=self.configfile.reportProgress,
                         contentPadding=10, contentAlignLeft=False,
                         header='Progress: ', footer=f'/{estimatedPostLimit} posts (upper limit approximate)',
@@ -570,46 +749,56 @@ class Saver:
                     self.jsonDumpToFile(p.toStore(), output)
                     output.write('\n')
 
-                    if header.storage.count == 0:
-                        header.storage.firstPostId = p.id
-                        if options.downloadTimeDirection == OrderDirection.Asc:
-                            header.storage.beginTime = p.createTime if options.postsAfterTime is None else min(p.createTime, options.postsAfterTime)
-                        else:
-                            header.storage.beginTime = p.createTime if options.postsBeforeTime is None else max(p.createTime, options.postsBeforeTime)
-                        header.storage.postIdBeforeFirst = hints.postIdBefore if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdAfter
-                    header.storage.lastPostId = p.id
-                    header.storage.endTime = p.createTime
-                    header.storage.postIdAfterLast = hints.postIdAfter if options.downloadTimeDirection == OrderDirection.Asc else hints.postIdBefore
-
-                    header.storage.count += 1
+                    header.storage.addSortedPost(p, hints, options.downloadTimeDirection)
                     if showProgressReport:
                         progressReporter.update(str(header.storage.count))
 
-                self.driver.processPosts(processor=perPost, channel=channel, **params)
+                self.driver.processPosts(processor=perPost, channel=channel, **dlParams)
 
                 if showProgressReport:
                     progressReporter.close()
                 logging.info('Processed all posts.')
 
-            if options.emojiMetadata:
-                for emoji in header.usedEmojis:
-                    self.enrichEmoji(emoji)
-            if options.downloadEmoji and not self.configfile.downloadAllEmojis:
-                self.processEmoji('emojis', emojis=header.usedEmojis)
+                # Update header's bytesize
+                output.flush()
+                header.storage.byteSize = os.fstat(output.fileno()).st_size
 
-            if options.downloadAttachments:
-                self.processAttachments(channelOutfile+'--files', channelOpts=options, attachments=attachments)
-
-            if options.downloadAvatars:
-                self.processAvatars('avatars', users=header.usedUsers)
+            self.processChannelAuxiliaries(channelOutfile, header, options, attachments)
 
             # Add to header content that is only relevant for nonfresh posts
             if archiveHeader is not None:
                 archiveHeader.update(header)
                 header = archiveHeader
 
-            self.jsonDumpToFile(header.toStore(), headerFile)
+            # Store new header file
+            headerContent = header.toStore()
+            with open(headerFilename, 'w', encoding='utf8') as headerFile:
+                self.jsonDumpToFile(headerContent, headerFile)
+        except BaseException as err:
+            # In appending mode, revert to pre-download state is done unconditionally
+            if (isinstance(archiveRecoveryStrategy, RReuse) and not fromScratch
+                    and archiveFileInfo is not None and archiveFileInfo.dataFileStats is not None):
+                oldDataFileSize = archiveFileInfo.dataFileStats.st_size
+                self.restoreArchiveBackup(channelOutfile, channelOutfile+'--backup', oldDataFileSize=oldDataFileSize)
+            else:
+                opts = self.recoveryArbiter.onPostLoadingFailure(header, headerFilename, dataFilename, err)
+                if isinstance(opts, RDelete):
+                    if headerFilename.is_file():
+                        headerFilename.unlink()
+                    if dataFilename.is_file():
+                        dataFilename.unlink()
+                else:
+                    assert isinstance(opts, RBackup)
+                    # Just keep broken downloaded state
+            raise
 
+        # Now we can remove temporary backup
+        if isinstance(archiveRecoveryStrategy, RReuse):
+            backup1, backup2 = self.makeArchiveFilenames(channelOutfile+'--backup')
+            if backup1.is_file():
+                backup1.unlink()
+            if backup2.is_file():
+                backup2.unlink()
 
     def processDirectChannel(self, otherUser: User, channelRequest: ChannelRequest):
         # channel, options = channelRequest.metadata, channelRequest.config
@@ -691,4 +880,4 @@ class Saver:
             for channel in perTeamChannels:
                 self.processTeamChannel(team, channel)
 
-        logging.info('Download process completed succesfuly.')
+        logging.info('Download process completed succesfully.')
