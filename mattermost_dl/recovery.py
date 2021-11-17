@@ -90,7 +90,8 @@ class RecoveryArbiter:
                 - RBackup - keep temporarily downloaded state
                 - RDelete - remove downloaded data
         '''
-        logging.warning(f"Downloading of channel '{header.channel.internalName}' failed, partially downloaded content is left for inspection.\nReason: {err}")
+        state = 'was interrupted' if isinstance(err, KeyboardInterrupt) else 'failed'
+        logging.warning(f"Downloading of channel '{header.channel.internalName}' {state}, partially downloaded content is left for inspection.\nReason: {err}")
         return RBackup()
 
     def onExistingChannelBackup(self, channel: Channel, headerFilename: Path, dataFilename: Path) -> Union[RBackup, RDelete, RSkipDownload]:

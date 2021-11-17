@@ -776,9 +776,9 @@ class Saver:
                 self.jsonDumpToFile(headerContent, headerFile)
         except BaseException as err:
             # In appending mode, revert to pre-download state is done unconditionally
-            if (isinstance(archiveRecoveryStrategy, RReuse) and not fromScratch
-                    and archiveFileInfo is not None and archiveFileInfo.dataFileStats is not None):
-                oldDataFileSize = archiveFileInfo.dataFileStats.st_size
+            if (isinstance(archiveRecoveryStrategy, RReuse) and not fromScratch):
+                assert archiveFileInfo is not None
+                oldDataFileSize = archiveFileInfo.dataFileStats.st_size if archiveFileInfo.dataFileStats is not None else None
                 self.restoreArchiveBackup(channelOutfile, channelOutfile+'--backup', oldDataFileSize=oldDataFileSize)
             else:
                 opts = self.recoveryArbiter.onPostLoadingFailure(header, headerFilename, dataFilename, err)
@@ -787,6 +787,11 @@ class Saver:
                         headerFilename.unlink()
                     if dataFilename.is_file():
                         dataFilename.unlink()
+                    if isinstance(archiveRecoveryStrategy, RReuse):
+                        assert fromScratch
+                        # If we're willing to reuse, but started from the scratch,
+                        # we can restore the backup back into primary
+                        self.restoreArchiveBackup(channelOutfile, channelOutfile+'--backup')
                 else:
                     assert isinstance(opts, RBackup)
                     # Just keep broken downloaded state
