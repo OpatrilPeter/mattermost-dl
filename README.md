@@ -54,7 +54,255 @@ Contents are saved in a directory set by the `output.directory` setting (current
 
 ## Configuration examples
 
-TODO: _Concrete examples will be added later._
+Required connection settings described already above are ommited for posterity.
+
+Note that comments (lines with `#`) are not actually allowed in json.
+
+If your test editor supports json schema based validation and suggestions, I'd recomend setting the configuration like this:
+
+```json
+{
+  "$schema": "path/to/json/schema/file/config.schema.json"
+}
+```
+
+### Download all channels
+
+Downloads complete history of all available channels.
+Doesn't download auxiliary data like file attachments or custom emoji.
+
+```json
+{
+}
+```
+
+### Customize download options for groups of channels
+
+Limit only up to total count of 10000 posts (to limit very spammy channels), with additional limit for this specific session to 1000 (to make the update faster).
+
+```json
+{
+  "defaultChannelOptions": {
+    "maximumPostCount": 10000,
+    "sessionPostLimit": 1000
+  },
+  # Override for more specific group of channels
+  "directChannelOptions": {
+    # For personal peer-to-peer channels, we don't want limits
+    "maximumPostCount": -1,
+    "sessionPostLimit": -1
+  }
+  "users": [
+    {
+      "name": "spammy.mcperson",
+      # We can override settings per individual channel
+      "sessionPostLimit": 100
+    }
+  ]
+}
+```
+
+Note that more specific channel settings, if present, _completely replace_ more general settings - settings are not merged.
+
+Download all private channels, but only selected public channels.
+
+```json
+{
+  # Without this, all teams are downloaded - list in "teams" just specifies overrides
+  # With this, only teams mentioned in "teams" are downloaded
+  "downloadTeams": false,
+  "teams": [
+    {
+      "team": {"name": "Team"},
+      "downloadPublicChannels": false,
+      "publicChannels": [
+        {"internalName": "public1"},
+        {"internalName": "public2"}
+      ],
+      "publicChannelOptions": {
+        # We only want a sample of those public channels
+        "sessionPostLimit": 100
+      }
+    }
+  ]
+}
+```
+
+### Download specific channel
+
+Public/private channel:
+
+```json
+{
+  # Download only explicitly chosen channels
+  "downloadTeams": false,
+  "downloadUserChannels": false,
+  "downloadGroupChannels": false,
+
+  "teams": [
+    {
+      "team": {
+        "name": "Team"
+        # We could also identify team by its internal name - `internalName` (which is unambiguous) or internal id
+      },
+      # Again, download only explicitly chosen channels
+      "downloadPublicChannels": false,
+      "downloadPrivateChannels": false,
+
+      # Or `privateChannels`
+      "publicChannels": [
+        {
+          "name": "Channel name"
+          # Channel specific download constraints go here
+        }
+      ]
+    }
+  ]
+}
+```
+
+Group channel:
+
+```json
+{
+  "groups": [
+    {
+      "group": [
+        {"name": "member user 1"},
+        {"name": "member user 2"},
+        {"name": "member user 3"}
+      ],
+      # Usual channel options are supported
+      "downloadFromOldest": false
+    },
+    {
+      "group": "abcdef" # Channel Id is also supported
+    }
+  ]
+}
+```
+
+Direct (one-on-one, user-specific) channel:
+
+```json
+{
+  # To stop downloading OTHER user cannels
+  "downloadUserChannels": false,
+
+  "users": [
+    {
+      "name": "username",
+      # Usual channel options are supported
+    }
+  ]
+}
+```
+
+### Download only messages in some time range
+
+Download things after date:
+
+```json
+{
+  "defaultChannelOptions": {
+    "afterTime": "1970-01-01"
+  }
+}
+```
+
+Available time formats are:
+
+- ISO datetime (`"1970-01-01T01:23:45.832330"`)
+- Unix timestamp in ms (`12345`)
+
+
+Download things in interval:
+
+```json
+{
+  "defaultChannelOptions": {
+    "afterTime": "1970-01-01",
+    "beforeTime": "2000-01-01"
+  }
+}
+```
+
+Download thing after specific post:
+
+```json
+{
+  "defaultChannelOptions": {
+    "afterPost": "abcdef" # Post Id
+  }
+}
+```
+
+Download last 10 messages:
+
+```json
+{
+  "users": [
+    {
+      "name": "username",
+      "downloadFromOldest": false,
+      "messageCount": 10
+    }
+  ]
+}
+```
+
+### Download everything we can
+
+```json
+{
+  # These are on by default
+  "downloadTeams": true,
+  "downloadUserChannels": true,
+  "downloadGroupChannels": true,
+
+  # Custom (non-builtin) emojis can be downloaded either completely this way or just the ones being used (in channel options)
+  "downloadEmojis": true,
+
+  "defaultChannelOptions": {
+    "emojis": {
+      "download": true
+    },
+    "avatars": {
+      "download": true
+    }
+  },
+  "directChannelOptions": {
+    # Downloading files in public channels could be bad idea
+    "attachments": {
+      "download": true,
+      # Optional sanity filters
+      "maxSize": 10485760, # 10MB
+      "allowedMimeTypes": [
+        "application/pdf"
+      ]
+    }
+  }
+}
+```
+
+### Reduce backup creation
+
+By default, lot of care exist to prevent loss of already downloaded data.
+That leads to keeping intermediate data on errors and interrupted downloads and backing up the channel in case it's redownloaded when the required options for that channel aren't compatible with appending into previous storage.
+Those backups can be distingushed by having `--backup` in their name and should be removed manually if not required.
+
+The redownload case can be configured like so:
+
+```json
+{
+  "defaultChannelOptions": {
+    # If we can append into current archive, should we do it or redownload from scratch?
+    "onExistingCompatible": "update",
+    # If we do have to redownload, don't keep old archive
+    "onExistingIncompatible": "delete"
+  }
+}
+```
 
 ## Supported environmental variables
 

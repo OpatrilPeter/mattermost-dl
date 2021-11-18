@@ -2,10 +2,6 @@
 
 ## 1.0
 
-### chore
-
-- readme (more configuration examples)
-
 ### feat
 
 - more info messages

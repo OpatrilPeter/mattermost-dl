@@ -385,7 +385,7 @@ class Saver:
                 else:
                     if options.postsBeforeTime > options.postsAfterTime:
                         return False
-                        
+
             return options
 
         else: # options.downloadTimeDirection == OrderDirection.Desc
