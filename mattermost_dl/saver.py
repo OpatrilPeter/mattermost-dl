@@ -328,11 +328,14 @@ class Saver:
         '''
             Updates constraints in channel options based on what's already downloaded in archive.
 
+            Note that archive may contain more posts than current download options demand, but the
+            posts will stay in one continuous interval.
+
             @param storage archive's storage
             @returns either
                 - False if no download is necessary
-                - True if download should be done from scratch (and thus no reducing happens)
-                - updated ChannelOptions
+                - True if download should be done from scratch
+                - updated ChannelOptions, if current archive can be appended into
         '''
 
         options = copy(channelOptions)
@@ -343,21 +346,29 @@ class Saver:
                 if (options.postsAfterTime < storage.beginTime and storage.postIdBeforeFirst is not None
                     or options.postsAfterTime > storage.endTime):
                     return True
+                # Valid branch, but not needed
+                # else: # In archive
+                #     options.postsAfterTime = storage.endTime
+                #     if options.postsAfterId is None:
+                #         options.postsAfterId = storage.lastPostId
             if options.postsAfterId is not None:
-                if options.postsAfterId == storage.firstPostId:
+                if options.postsAfterId in (storage.postIdBeforeFirst, storage.firstPostId, storage.lastPostId):
                     options.postsAfterId = storage.lastPostId
-                    options.postsAfterTime = storage.endTime if options.postsAfterTime is None else max(storage.endTime, options.postsAfterTime)
-                elif options.postsAfterId == storage.lastPostId:
                     options.postsAfterTime = storage.endTime if options.postsAfterTime is None else max(storage.endTime, options.postsAfterTime)
                 else:
                     postTime = self.driver.getPostById(options.postsAfterId).createTime
                     options.postsAfterTime = postTime if options.postsAfterTime is None else max(postTime, options.postsAfterTime)
             else:
+                # This is valid, because
+                #   - postsAfterTime is None or in archive's time interval
+                #   - postsAfterId is None
+                #   - postsBeforeTime is None or after the archive's time interval
+                #   - postsBeforeId is None or will be either resolved into time interval
+                #     that must be after archive's time interval or short circuit
                 options.postsAfterId = storage.lastPostId
                 options.postsAfterTime = storage.endTime if options.postsAfterTime is None else max(storage.endTime, options.postsAfterTime)
             if options.postsBeforeId is not None:
-                if (options.postsBeforeId == storage.firstPostId
-                    or options.postsBeforeId == storage.lastPostId):
+                if options.postsBeforeId in (storage.firstPostId, storage.lastPostId, storage.postIdAfterLast):
                     return False
                 else:
                     postTime = self.driver.getPostById(options.postsBeforeId).createTime
@@ -369,25 +380,20 @@ class Saver:
                     else:
                         return True
                 # In archive
-                elif options.postsBeforeTime <= storage.endTime:  # type: ignore
+                elif options.postsBeforeTime <= storage.endTime:
                     return False
                 else:
-                    if options.postsBeforeTime > options.postsAfterTime: # type: ignore
+                    if options.postsBeforeTime > options.postsAfterTime:
                         return False
+                        
             return options
 
         else: # options.downloadTimeDirection == OrderDirection.Desc
             # Mirrored all conditions from above branch in other time direction
 
-            if options.postsBeforeTime is not None:
-                if (options.postsBeforeTime > storage.beginTime and storage.postIdBeforeFirst is not None
-                    or options.postsBeforeTime < storage.endTime):
-                    return True
             if options.postsBeforeId is not None:
-                if options.postsBeforeId == storage.firstPostId:
+                if options.postsBeforeId in (storage.postIdBeforeFirst, storage.firstPostId, storage.lastPostId):
                     options.postsBeforeId = storage.lastPostId
-                    options.postsBeforeTime = storage.endTime if options.postsBeforeTime is None else min(storage.endTime, options.postsBeforeTime)
-                elif options.postsBeforeId == storage.lastPostId:
                     options.postsBeforeTime = storage.endTime if options.postsBeforeTime is None else min(storage.endTime, options.postsBeforeTime)
                 else:
                     postTime = self.driver.getPostById(options.postsBeforeId).createTime
@@ -395,9 +401,12 @@ class Saver:
             else:
                 options.postsBeforeId = storage.lastPostId
                 options.postsBeforeTime = storage.endTime if options.postsBeforeTime is None else min(storage.endTime, options.postsBeforeTime)
+            if options.postsBeforeTime is not None:
+                if (options.postsBeforeTime > storage.beginTime and storage.postIdBeforeFirst is not None
+                    or options.postsBeforeTime < storage.endTime):
+                    return True
             if options.postsAfterId is not None:
-                if (options.postsAfterId == storage.firstPostId
-                    or options.postsAfterId == storage.lastPostId):
+                if options.postsAfterId in (storage.firstPostId, storage.lastPostId, storage.postIdAfterLast):
                     return False
                 else:
                     postTime = self.driver.getPostById(options.postsAfterId).createTime
@@ -409,10 +418,10 @@ class Saver:
                     else:
                         return True
                 # In archive
-                elif options.postsAfterTime >= storage.endTime: # type: ignore
+                elif options.postsAfterTime >= storage.endTime:
                     return False
                 else:
-                    if options.postsAfterTime > options.postsBeforeTime: # type: ignore
+                    if options.postsAfterTime > options.postsBeforeTime:
                         return False
 
             return options

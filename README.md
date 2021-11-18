@@ -50,7 +50,7 @@ On default settings, all channels gets downloaded with unbounded history, so you
 
 Full configuration options are described via configuration file's [JSON schema](mattermost_dl/config.schema.json).
 
-Contents are saved in a directory set by the `output.directory` setting (current working directory by default) - each channel gets stored in two files as described in next section, data files are stored in respective subdirectories.
+Contents are saved in a directory set by the `output.directory` setting (current working directory by default) - each channel gets stored in two files as described in section Storage format, data files are stored in respective subdirectories.
 
 ## Configuration examples
 
