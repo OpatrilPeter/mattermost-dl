@@ -387,6 +387,8 @@ class FileAttachment(JsonMessage):
 class PostReaction(JsonMessage):
     userId: Id
     createTime: Time
+    updateTime: Optional[Time] = None
+    deleteTime: Optional[Time] = None
     emojiId: Optional[Id] = None
     emojiName: Optional[str] = None
 
@@ -399,6 +401,13 @@ class PostReaction(JsonMessage):
 
         r.userId = r.extract('user_id')
         r.createTime = Time(r.extract('create_at'))
+        x = r.extractOr('update_at', 0)
+        if x != r.createTime.timestamp:
+            r.updateTime = Time(x)
+        x = r.extractOr('delete_at', 0)
+        if x != 0:
+            r.deleteTime = Time(x)
+
         r.emojiName = r.extract('emoji_name')
 
         r.drop('post_id')
