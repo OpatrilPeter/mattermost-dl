@@ -143,17 +143,17 @@ class TeamSpec:
         self = TeamSpec(locator=EntityLocator(info['team']))
 
         if 'defaultChannelOptions' in info:
-            channelDefaults = ChannelOptions(info['defaultChannelOptions'])
+            channelDefaults = ChannelOptions().update(info['defaultChannelOptions'])
         else:
             channelDefaults = None
         if 'privateChannelOptions' in info:
-            self.privateChannelDefaults = ChannelOptions(info['privateChannelOptions'])
+            self.privateChannelDefaults = ChannelOptions().update(info['privateChannelOptions'])
         elif channelDefaults:
             self.privateChannelDefaults = channelDefaults
         else:
             self.privateChannelDefaults = globalPrivateDefaults
         if 'publicChannelOptions' in info:
-            self.publicChannelDefaults = ChannelOptions(info['publicChannelOptions'])
+            self.publicChannelDefaults = ChannelOptions().update(info['publicChannelOptions'])
         elif channelDefaults:
             self.publicChannelDefaults = channelDefaults
         else:
