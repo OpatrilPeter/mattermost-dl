@@ -87,7 +87,7 @@ class MattermostDriver:
         headers = {}
         if self.authorizationToken:
             headers.update({'Token': self.authorizationToken})
-        r = self.session.post(self.configfile.hostname + self.API_PART + apiCommand, json.dumps(data), headers=headers)
+        r = self.session.post(self.configfile.hostname + self.API_PART + apiCommand, data, headers=headers)
         if r.status_code != 200:
             self.onBadHttpResponse(apiCommand, r)
         return r
