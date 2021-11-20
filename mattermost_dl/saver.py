@@ -622,7 +622,7 @@ class Saver:
                         assert archiveHeader.storage.byteSize < dataFileStats.st_size
                         os.truncate(dataFilename, archiveHeader.storage.byteSize)
         else:
-            if dataFileStats is not None: # Unexpected data file
+            if dataFileStats is not None and dataFileStats.st_size > 0: # Unexpected data file
                 opts = self.recoveryArbiter.onMissizedDataFile(
                     archiveHeader, dataFilename=dataFilename, size=dataFileStats.st_size)
                 if isinstance(opts, (RBackup, RDelete, RSkipDownload)):
@@ -798,7 +798,7 @@ class Saver:
             self.processChannelAuxiliaries(channelOutfile, header, options, attachments)
 
             # Add to header content that is only relevant for nonfresh posts
-            if archiveHeader is not None:
+            if archiveHeader is not None and not fromScratch:
                 archiveHeader.update(header)
                 header = archiveHeader
 
