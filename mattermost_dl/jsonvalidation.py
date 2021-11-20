@@ -79,8 +79,9 @@ def validate(jsonObject: Any, validator: Draft7Validator,
             onWarning(InvalidVersion(jsonObject['version']))
         else:
             version = jsonObject['version']
+            # We do only very crude major version check for now
             if not re.match(fr'^{acceptedVersion}\.?.*', version):
-                onWarning(UnsupportedVersion(required="0", found=version))
+                onWarning(UnsupportedVersion(required=acceptedVersion, found=version))
 
     # This actually performs the validation
     validationErrors = [error for error in validator.iter_errors(jsonObject)]

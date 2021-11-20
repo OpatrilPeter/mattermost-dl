@@ -263,7 +263,7 @@ class ConfigFile:
             raise ConfigurationError(filename=filename)
 
         validateJson(config, ConfigFile._schemaValidator,
-            acceptedVersion='0',
+            acceptedVersion='1',
             onWarning=onWarning,
             onError=onError,
         )

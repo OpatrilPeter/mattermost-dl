@@ -58,7 +58,7 @@ This configuration file allows high degree of configurability, setting options o
 The minimal amount of required settings include server's address and appropriate login credentials - the minimalist config may look like this:
 
 ```toml
-version = "0"
+version = "1"
 
 [connection]
 hostname = "https://mattermost-server.com"
@@ -71,7 +71,7 @@ Or in JSON:
 
 ```json
 {
-  "version": "0",
+  "version": "1",
   "connection": {
     "hostname": "https://mattermost-server.com",
     "username": "user.name",

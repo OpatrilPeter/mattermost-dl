@@ -148,7 +148,7 @@ class ChannelHeader:
         def onWarning(w):
             if isinstance(w, jsonvalidation.UnsupportedVersion):
                 logging.warning(
-                    f'Loading channel from future version {w.found}, current version is 0. It may not be loadable and some data may be lost.')
+                    f'Loading channel from future version {w.found}, currently supported version is 1. It may not be loadable and some data may be lost.')
             else:
                 logging.warning(f"Channel header encountered warning '{w}', it may not be loadable correctly.")
         def onError(e):
@@ -159,7 +159,7 @@ class ChannelHeader:
                 logging.error("Channel header didn't match expected schema. " + formatValidationErrors(e))
             raise StoreError
         info = validateJson(info, cls._schemaValidator,
-                            acceptedVersion='0', onWarning=onWarning, onError=onError)
+                            acceptedVersion='1', onWarning=onWarning, onError=onError)
 
         self = cast(ChannelHeader, ClassMock())
         self.channel = Channel.fromStore(info['channel'])
@@ -193,7 +193,7 @@ class ChannelHeader:
 
     def toStore(self) -> dict:
         content: Dict[str, Any] = {
-            'version': '0'
+            'version': '1'
         }
         if self.team:
             content.update(team=self.team.toStore(includeChannels=False))

@@ -564,7 +564,7 @@ class Post(JsonMessage):
                     logging.error("Post didn't match expected schema. " + formatValidationErrors(e))
                 raise StoreError
             onError = onErrorDefault
-        validateJson(info, cls._schemaValidator, acceptedVersion='0', onWarning=onWarning, onError=onError)
+        validateJson(info, cls._schemaValidator, acceptedVersion='1', onWarning=onWarning, onError=onError)
         cls._schemaValidator.validate(info)
         return super().fromStore(info)
 
