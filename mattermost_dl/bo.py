@@ -645,7 +645,9 @@ class Channel(JsonMessage):
         if x:
             ch.purpose = x
 
-        ch.lastMessageTime = Time(ch.extract('last_post_at'))
+        x = ch.extract('last_post_at')
+        if x != 0:
+            ch.lastMessageTime = Time(x)
         ch.messageCount = ch.extract('total_msg_count')
         ch.rootMessageCount = ch.extractOr('total_msg_count_root', None)
         x = ch.extract('creator_id')

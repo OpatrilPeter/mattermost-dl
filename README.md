@@ -198,6 +198,19 @@ Direct (one-on-one, user-specific) channel:
 }
 ```
 
+Skip downloading specific channel:
+
+```json
+{
+  "users": [
+    {
+      "name": "unwanted-chatter",
+      "maximumPostCount": 0
+    }
+  ]
+}
+```
+
 ### Download only messages in some time range
 
 Download things after date:
@@ -214,7 +227,6 @@ Available time formats are:
 
 - ISO datetime (`"1970-01-01T01:23:45.832330"`)
 - Unix timestamp in ms (`12345`)
-
 
 Download things in interval:
 
@@ -237,7 +249,7 @@ Download thing after specific post:
 }
 ```
 
-Download last 10 messages:
+Download and keep only last 10 messages:
 
 ```json
 {
@@ -245,7 +257,8 @@ Download last 10 messages:
     {
       "name": "username",
       "downloadFromOldest": false,
-      "messageCount": 10
+      "messageCount": 10,
+      "onExistingIncompatible": "delete"
     }
   ]
 }

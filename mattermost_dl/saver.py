@@ -324,105 +324,300 @@ class Saver:
         return (self.configfile.verbosity == LogVerbosity.Normal
             and self.configfile.reportProgress.mode != progress.VisualizationMode.DumbTerminal)
 
-    def reduceChannelDownloadConstraints(self, channelOptions: ChannelOptions, storage: PostStorage) -> Union[bool, ChannelOptions]:
+    def reduceChannelDownloadConstraints(self, channelOptions: ChannelOptions, storage: PostStorage, lastChannelMessageTime: Time) -> Union[bool, ChannelOptions]:
         '''
             Updates constraints in channel options based on what's already downloaded in archive.
 
             Note that archive may contain more posts than current download options demand, but the
             posts will stay in one continuous interval.
 
+            Reflects following options:
+                - organization
+                - postsAfterId
+                - postsBeforeId
+                - postsBeforeTime
+                - postsAfterTime
+                - postLimit
+
             @param storage archive's storage
             @returns either
                 - False if no download is necessary
-                - True if download should be done from scratch
+                - True if download should be done from scratch as current channel options
+                  are incompatible with current request
                 - updated ChannelOptions, if current archive can be appended into
+
+            Note that as lastChannelMessageTime could also be time of last update,
+            while storage only tracks message creation time, it may suggest updating otherwise complete archive
         '''
+
+        '''
+            This is one of the most complex functions, so here's overview of the internal logic:
+
+            - note that storage begin and end depends on order, while ChannelOptions does not
+            - only continuous, single interval storage is supported
+            - postLimit is already considered nonzero
+            - channel is not empty, because we have nonempty storage from previous download
+            - we assume here that multiple posts do not happen at exactly same timestamp (in miliseconds)
+            - post Ids have no ordering, but we can fetch posts's creation time if really needed
+                - but this is expensive, so we prefer to do that only as last resort
+
+            Time intervals in ascending direction has following time points:
+                - first message in channel
+                    - generally unknown, but if storage.postIdBeforeFirst is None, it must be storage.firstPostId
+                - post before first
+                    - if None, we know we have start of storage
+                - first post of storage
+                - last post of storage
+                - post after last
+                    - if None, we have downloaded channel up to the end at the time
+                        - if lastChannelMessageTime == storage.endTime, storage has last message in channel
+                            - if we also start at the beginning, we can full channel history already
+                        - if lastChannelMessageTime > storage.endTime, we must download from scratch unless we want content before storage.endTime
+                - last message in channel
+                    - known only by lastChannelMessageTime
+
+            Requested interval stops ...
+                - at the last message
+                - at beforeId/beforeTime
+                    - if both are specified, it is converted to time and minimum is used
+            Requested interval starts ...
+                - at the first message (if afterId/afterTime is unspecified)
+                    - if storage doesn't start at first message, we need to redownload
+                - at later point specified by afterId/afterTime
+                    - as there is no ordering on postIds, we must transform it into time, unless it's one one the known ids
+                        - if both are specified, it is converted to time and maximum is used
+
+                - if requested interval ends before it starts
+                    - do nothing
+
+                - if it's before storage, we need to redownload
+                - if it's at storage start (common case in incremental downloading)
+                    - if the storage size is >= postLimit
+                        - do nothing
+                    - else
+                        - if requested interval stops before or at the end of storage
+                            - do nothing
+                        - else
+                            - append to storage (consider postLimit, decrease be storage size)
+                - it it's in the middle of the storage
+                    - if requested interval stops before or at the end of storage
+                        - do nothing
+                    - else
+                        - if there's no post limit
+                            - append to storage
+                        - else
+                            - we don't know exactly where in the storage we are, so we don't know how to decrease the limit of if the limit is reached yet
+                            - we could iterate through the storage and find exact position, but that's too much work
+                            - => redownload
+                - if it's at storage end
+                    - if requested interval stops before or at the end of storage
+                        - do nothing
+                    - else
+                        - append to storage
+                - if it's after storage, we need to redownload
+
+            Descending direction works with equivalent logic, just with time points reversed. Mattermost's API is optimized for this case,
+            but since its default start timepoint is mutable (latest post), every time new post arrive, archive must be redownloaded, that's why it's not the default.
+        '''
+
+        newOrganization = PostOrdering.AscendingContinuous if channelOptions.downloadTimeDirection == OrderDirection.Asc else PostOrdering.DescendingContinuous
+        if newOrganization != storage.organization:
+            return True
 
         options = copy(channelOptions)
 
-        if options.downloadTimeDirection == OrderDirection.Asc:
-
-            if options.postsAfterTime is not None:
-                if (options.postsAfterTime < storage.beginTime and storage.postIdBeforeFirst is not None
-                    or options.postsAfterTime > storage.endTime):
-                    return True
-                # Valid branch, but not needed
-                # else: # In archive
-                #     options.postsAfterTime = storage.endTime
-                #     if options.postsAfterId is None:
-                #         options.postsAfterId = storage.lastPostId
-            if options.postsAfterId is not None:
-                if options.postsAfterId in (storage.postIdBeforeFirst, storage.firstPostId, storage.lastPostId):
-                    options.postsAfterId = storage.lastPostId
-                    options.postsAfterTime = storage.endTime if options.postsAfterTime is None else max(storage.endTime, options.postsAfterTime)
-                else:
-                    postTime = self.driver.getPostById(options.postsAfterId).createTime
-                    options.postsAfterTime = postTime if options.postsAfterTime is None else max(postTime, options.postsAfterTime)
+        def getBeginIdTime() -> Time:
+            nonlocal options
+            if options.downloadTimeDirection == OrderDirection.Asc:
+                assert options.postsAfterId is not None
+                postTime = self.driver.getPostById(options.postsAfterId).createTime
+                options.postsAfterTime = max(postTime, options.postsAfterTime) if options.postsAfterTime is not None else postTime
+                return options.postsAfterTime
             else:
-                # This is valid, because
-                #   - postsAfterTime is None or in archive's time interval
-                #   - postsAfterId is None
-                #   - postsBeforeTime is None or after the archive's time interval
-                #   - postsBeforeId is None or will be either resolved into time interval
-                #     that must be after archive's time interval or short circuit
-                options.postsAfterId = storage.lastPostId
-                options.postsAfterTime = storage.endTime if options.postsAfterTime is None else max(storage.endTime, options.postsAfterTime)
-            if options.postsBeforeId is not None:
-                if options.postsBeforeId in (storage.firstPostId, storage.lastPostId, storage.postIdAfterLast):
-                    return False
+                assert options.postsBeforeId is not None
+                postTime = self.driver.getPostById(options.postsBeforeId).createTime
+                options.postsBeforeTime = min(postTime, options.postsBeforeTime) if options.postsBeforeTime is not None else postTime
+                return options.postsBeforeTime
+
+        def getEndIdTime() -> Time:
+            nonlocal options
+            if options.downloadTimeDirection == OrderDirection.Asc:
+                assert options.postsBeforeId is not None
+                postTime = self.driver.getPostById(options.postsBeforeId).createTime
+                options.postsBeforeTime = min(postTime, options.postsBeforeTime) if options.postsBeforeTime is not None else postTime
+                return options.postsBeforeTime
+            else:
+                assert options.postsAfterId is not None
+                postTime = self.driver.getPostById(options.postsAfterId).createTime
+                options.postsAfterTime = max(postTime, options.postsAfterTime) if options.postsAfterTime is not None else postTime
+                return options.postsAfterTime
+
+        def getEndTime() -> Time:
+            nonlocal options
+            if options.downloadTimeDirection == OrderDirection.Asc:
+                if options.postsBeforeId is not None or options.postsBeforeTime is not None:
+                    if options.postsBeforeId is not None:
+                        if options.postsBeforeId == storage.firstPostId:
+                            options.postsBeforeTime = min(options.postsBeforeTime, storage.beginTime) if options.postsBeforeTime is not None else storage.beginTime
+                        elif options.postsBeforeId == storage.lastPostId:
+                            options.postsBeforeTime = min(options.postsBeforeTime, storage.endTime) if options.postsBeforeTime is not None else storage.endTime
+                        else:
+                            getEndIdTime()
+                    assert options.postsBeforeTime is not None
                 else:
-                    postTime = self.driver.getPostById(options.postsBeforeId).createTime
-                    options.postsBeforeTime = postTime if options.postsBeforeTime is None else max(postTime, options.postsBeforeTime)
-            if options.postsBeforeTime is not None:
-                if options.postsBeforeTime < storage.beginTime:
-                    if storage.postIdBeforeFirst is None:
+                    options.postsBeforeTime = Time(lastChannelMessageTime.timestamp+1)
+                return options.postsBeforeTime
+            else:
+                if options.postsAfterId is not None or options.postsAfterTime is not None:
+                    if options.postsAfterId is not None:
+                        if options.postsAfterId == storage.firstPostId:
+                            options.postsAfterTime = min(options.postsAfterTime, storage.beginTime) if options.postsAfterTime is not None else storage.beginTime
+                        elif options.postsAfterId == storage.lastPostId:
+                            options.postsAfterTime = min(options.postsAfterTime, storage.endTime) if options.postsAfterTime is not None else storage.endTime
+                        else:
+                            getEndIdTime()
+                    assert options.postsAfterTime is not None
+                else:
+                    options.postsAfterTime = Time(0)
+                return options.postsAfterTime
+
+        def continueStorage():
+            '''Called if exactly all posts in storage are part of requested data.'''
+            nonlocal options
+            if options.downloadTimeDirection == OrderDirection.Asc:
+                if options.postLimit != -1:
+                    if options.postLimit <= storage.count:
                         return False
                     else:
-                        return True
-                # In archive
-                elif options.postsBeforeTime <= storage.endTime:
+                        options.postLimit -= storage.count
+                        options.postsAfterId = storage.lastPostId
+                        options.postsAfterTime = storage.endTime
+                else:
+                    options.postsAfterId = storage.lastPostId
+                    options.postsAfterTime = storage.endTime
+            else:
+                if options.postLimit != -1:
+                    if options.postLimit <= storage.count:
+                        return False
+                    else:
+                        options.postLimit -= storage.count
+                        options.postsBeforeId = storage.lastPostId
+                        options.postsBeforeTime = storage.endTime
+                else:
+                    options.postsBeforeId = storage.lastPostId
+                    options.postsBeforeTime = storage.endTime
+
+        def updateOptsWithBeginTime():
+            nonlocal options
+            if options.downloadTimeDirection == OrderDirection.Asc:
+                assert options.postsAfterTime is not None
+
+                if options.postsAfterTime < storage.beginTime:
+                    return True
+                elif options.postsAfterTime < storage.endTime:
+                    res = continueStorage()
+                    if res is not None:
+                        return res
+                elif options.postsAfterTime == storage.endTime:
+                    pass
+                else:
+                    return True
+            else:
+                assert options.postsBeforeTime is not None
+
+                if options.postsBeforeTime > storage.beginTime:
+                    return True
+                elif options.postsBeforeTime > storage.endTime:
+                    res = continueStorage()
+                    if res is not None:
+                        return res
+                elif options.postsBeforeTime == storage.endTime:
+                    pass
+                else:
+                    return True
+
+        if options.downloadTimeDirection == OrderDirection.Asc:
+
+            if options.postsAfterTime is not None or options.postsAfterId is not None:
+                if options.postsAfterId is not None:
+                    if options.postsAfterId == storage.postIdBeforeFirst:
+                        res = continueStorage()
+                        if res is not None:
+                            return res
+                    elif options.postsAfterId == storage.lastPostId:
+                        options.postsAfterTime = storage.endTime
+                    else: # We don't specialize otherwise
+                        getBeginIdTime()
+                    assert options.postsAfterTime is not None
+
+                ret = updateOptsWithBeginTime()
+                if ret is not None:
+                    return ret
+            else: # Starting from first message
+                if storage.postIdBeforeFirst is not None:
+                    return True
+                elif storage.endTime == lastChannelMessageTime:
                     return False
                 else:
-                    if options.postsBeforeTime > options.postsAfterTime:
-                        return False
+                    assert lastChannelMessageTime > storage.endTime
+                    res = continueStorage()
+                    if res is not None:
+                        return res
+            assert options.postsAfterTime is not None # Also in or at the end of archive
+
+            if options.postsBeforeId is not None:
+                if options.postsBeforeId in (storage.postIdBeforeFirst, storage.firstPostId, storage.lastPostId, storage.postIdAfterLast):
+                    return False
+            getEndTime()
+            assert options.postsBeforeTime is not None
+
+            if options.postsBeforeTime <= storage.endTime:
+                return False
+            if options.postsBeforeTime < options.postsAfterTime:
+                return False
 
             return options
 
         else: # options.downloadTimeDirection == OrderDirection.Desc
-            # Mirrored all conditions from above branch in other time direction
+            # Mostly mirrored all conditions from above branch in other time direction
 
-            if options.postsBeforeId is not None:
-                if options.postsBeforeId in (storage.postIdBeforeFirst, storage.firstPostId, storage.lastPostId):
-                    options.postsBeforeId = storage.lastPostId
-                    options.postsBeforeTime = storage.endTime if options.postsBeforeTime is None else min(storage.endTime, options.postsBeforeTime)
-                else:
-                    postTime = self.driver.getPostById(options.postsBeforeId).createTime
-                    options.postsBeforeTime = postTime if options.postsBeforeTime is None else min(options.postsBeforeTime, postTime)
-            else:
-                options.postsBeforeId = storage.lastPostId
-                options.postsBeforeTime = storage.endTime if options.postsBeforeTime is None else min(storage.endTime, options.postsBeforeTime)
-            if options.postsBeforeTime is not None:
-                if (options.postsBeforeTime > storage.beginTime and storage.postIdBeforeFirst is not None
-                    or options.postsBeforeTime < storage.endTime):
+            if options.postsBeforeTime is not None or options.postsBeforeId is not None:
+                if options.postsBeforeId is not None:
+                    if options.postsBeforeId == storage.postIdBeforeFirst:
+                        res = continueStorage()
+                        if res is not None:
+                            return res
+                    elif options.postsBeforeId == storage.lastPostId:
+                        options.postsBeforeTime = storage.endTime
+                    else: # We don't specialize otherwise
+                        getBeginIdTime()
+                    assert options.postsBeforeTime is not None
+
+                ret = updateOptsWithBeginTime()
+                if ret is not None:
+                    return ret
+            else: # Starting from last message
+                if storage.postIdBeforeFirst is not None:
                     return True
+                elif lastChannelMessageTime > storage.beginTime:
+                    return True
+                else:
+                    assert lastChannelMessageTime == storage.beginTime
+                    res = continueStorage()
+                    if res is not None:
+                        return res
+            assert options.postsBeforeTime is not None # Also in or at the end of archive
+
             if options.postsAfterId is not None:
-                if options.postsAfterId in (storage.firstPostId, storage.lastPostId, storage.postIdAfterLast):
+                if options.postsAfterId in (storage.postIdBeforeFirst, storage.firstPostId, storage.lastPostId, storage.postIdAfterLast):
                     return False
-                else:
-                    postTime = self.driver.getPostById(options.postsAfterId).createTime
-                    options.postsAfterTime = postTime if options.postsAfterTime is None else min(options.postsAfterTime, postTime)
-            if options.postsAfterTime is not None:
-                if options.postsAfterTime > storage.beginTime:
-                    if storage.postIdBeforeFirst is None:
-                        return False
-                    else:
-                        return True
-                # In archive
-                elif options.postsAfterTime >= storage.endTime:
-                    return False
-                else:
-                    if options.postsAfterTime > options.postsBeforeTime:
-                        return False
+            getEndTime()
+            assert options.postsAfterTime is not None
+
+            if options.postsAfterTime >= storage.endTime:
+                return False
+            if options.postsAfterTime < options.postsBeforeTime:
+                return False
 
             return options
 
@@ -434,6 +629,29 @@ class Saver:
             and indicator whether current archive content is unsuitable for appending (requiring creation of archive from scratch).
             If archive's channel header indicates that all required posts are already present, returns None.
         '''
+
+        emptyArchive = archiveHeader is None or archiveHeader.storage is None
+        truncateArchive = archiveHeader is None
+
+        if emptyArchive and lastChannelMessageTime is None:
+            return None
+
+        if not (emptyArchive or truncateArchive):
+            assert archiveHeader is not None # Redundant, for linter
+            assert archiveHeader.storage is not None
+            # If we downloaded channel before there must be some messages available
+            assert lastChannelMessageTime is not None
+
+            opts = self.reduceChannelDownloadConstraints(options, archiveHeader.storage, lastChannelMessageTime)
+            if isinstance(opts, bool):
+                if opts:
+                    truncateArchive = True
+                else:
+                    return None
+            else:
+                assert isinstance(opts, ChannelOptions)
+                options = opts
+
         params: Dict[str, Any] = {
             'timeDirection': options.downloadTimeDirection
         }
@@ -445,38 +663,6 @@ class Saver:
                 params.update(maxCount=options.postLimit)
             else:
                 params.update(maxCount=min(options.postLimit, options.postSessionLimit))
-
-        emptyArchive = archiveHeader is None or archiveHeader.storage is None
-        truncateArchive = emptyArchive
-
-        if not truncateArchive:
-            assert archiveHeader is not None # Redundant, for linter
-            assert archiveHeader.storage is not None
-
-            if options.postLimit > 0:
-                if archiveHeader.storage.count >= options.postLimit:
-                    return None
-                else:
-                    params['maxCount'] = min(params['maxCount'], options.postLimit - archiveHeader.storage.count)
-
-            newOrganization = PostOrdering.AscendingContinuous if options.downloadTimeDirection == OrderDirection.Asc else PostOrdering.DescendingContinuous
-            if newOrganization != archiveHeader.storage.organization:
-                truncateArchive = True
-            else:
-                opts = self.reduceChannelDownloadConstraints(options, archiveHeader.storage)
-                if isinstance(opts, bool):
-                    if opts:
-                        truncateArchive = True
-                    else:
-                        return None
-                else:
-                    assert isinstance(opts, ChannelOptions)
-                    options = opts
-
-            if not truncateArchive and lastChannelMessageTime is not None:
-                if archiveHeader.storage.organization in (PostOrdering.Ascending, PostOrdering.AscendingContinuous):
-                    if archiveHeader.storage.endTime >= lastChannelMessageTime: # type: ignore
-                        return None
 
         if options.postsAfterId:
             params.update(afterPost=options.postsAfterId)
