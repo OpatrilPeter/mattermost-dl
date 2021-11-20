@@ -96,4 +96,9 @@ def main():
         sys.exit(1)
     setupLogging(conffile.verbosity)
 
-    Saver(conffile)()
+    try:
+        Saver(conffile)()
+    except:
+        logging.info("-----\n")
+        logging.fatal("Application encountered unexpected situation and will terminate, sorry for inconvenience.\nFollowing information can be useful for developers:")
+        raise

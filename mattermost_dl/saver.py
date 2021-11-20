@@ -762,11 +762,34 @@ class Saver:
                     if showProgressReport:
                         progressReporter.update(str(header.storage.count))
 
-                self.driver.processPosts(processor=perPost, channel=channel, **dlParams)
+                if showProgressReport:
+                    skippedPostCount = 0
+                    skippedLeadingMsg = False
+                    def onSkippedPost():
+                        nonlocal skippedLeadingMsg, skippedPostCount
+                        if showProgressReport and skippedPostCount % 99 == 0:
+                            if skippedLeadingMsg:
+                                print('.', end='', file=sys.stderr, flush=True)
+                            else:
+                                print(' ...skipping posts not matching condition...', end='', file=sys.stderr, flush=True)
+                                skippedLeadingMsg = True
+                        skippedPostCount += 1
+                else:
+                    def onSkippedPost():
+                        pass
+                postProcessRes = self.driver.processPosts(processor=perPost, channel=channel, **dlParams, onSkippedPost=onSkippedPost)
 
                 if showProgressReport:
                     progressReporter.close()
-                logging.info('Processed all posts.')
+                if postProcessRes == MattermostDriver.ProcessPostResult.NothingRequested:
+                    logging.info('Nothing to download.')
+                elif postProcessRes == MattermostDriver.ProcessPostResult.NoMorePosts:
+                    logging.info('Processed all posts.')
+                elif postProcessRes == MattermostDriver.ProcessPostResult.MaxCountReached:
+                    logging.info('Processed posts up to condition count.')
+                else:
+                    assert postProcessRes == MattermostDriver.ProcessPostResult.ConditionReached
+                    logging.info('Processed up to selected condition.')
 
                 # Update header's bytesize
                 output.flush()
@@ -860,38 +883,46 @@ class Saver:
         m = self.driver
 
         logging.info(f'Logging in as {self.configfile.username}.')
-        if self.configfile.token == '':
-            m.login()
-        self.user = m.loadLocalUser()
-
-        logging.info('Collecting metadata about available teams ...')
-        teams = m.getTeams()
-        if len(teams) == 0:
-            logging.fatal(f'User {self.configfile.username} is not member of any teams!')
+        try:
+            if self.configfile.token == '':
+                m.login()
+            self.user = m.loadLocalUser()
+        except Exception:
+            logging.error("Failed to log in. Check your credentials.")
             return
 
-        logging.info('Collecting metadata about available channels ...')
-        for team in teams.values():
-            m.loadChannels(teamId=team.id)
+        try:
+            logging.info('Collecting metadata about available teams ...')
+            teams = m.getTeams()
+            if len(teams) == 0:
+                logging.fatal(f'User {self.configfile.username} is not member of any teams!')
+                return
 
-        if self.configfile.downloadAllEmojis:
-            logging.info('Downloading emoji database ...')
-            emojis = self.driver.getEmojiList()
-            for emoji in emojis:
-                self.enrichEmoji(emoji)
-            self.processEmoji('emojis', emojis)
+            logging.info('Collecting metadata about available channels ...')
+            for team in teams.values():
+                m.loadChannels(teamId=team.id)
 
-        logging.info('Selecting channels to download ...')
-        directChannels, groupChannels = self.getWantedGlobalChannels()
-        teamChannels = self.getWantedPerTeamChannels()
+            if self.configfile.downloadAllEmojis:
+                logging.info('Downloading emoji database ...')
+                emojis = self.driver.getEmojiList()
+                for emoji in emojis:
+                    self.enrichEmoji(emoji)
+                self.processEmoji('emojis', emojis)
 
-        logging.info('Processing channels ...')
-        for user, channel in directChannels.items():
-            self.processDirectChannel(user, channel)
-        for channel in groupChannels:
-            self.processGroupChannel(channel)
-        for team, perTeamChannels in teamChannels.items():
-            for channel in perTeamChannels:
-                self.processTeamChannel(team, channel)
+            logging.info('Selecting channels to download ...')
+            directChannels, groupChannels = self.getWantedGlobalChannels()
+            teamChannels = self.getWantedPerTeamChannels()
+
+            logging.info('Processing channels ...')
+            for user, channel in directChannels.items():
+                self.processDirectChannel(user, channel)
+            for channel in groupChannels:
+                self.processGroupChannel(channel)
+            for team, perTeamChannels in teamChannels.items():
+                for channel in perTeamChannels:
+                    self.processTeamChannel(team, channel)
+        except KeyboardInterrupt:
+            logging.info('Downloading interrupted.')
+            return
 
         logging.info('Download process completed succesfully.')

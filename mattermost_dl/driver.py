@@ -247,12 +247,21 @@ class MattermostDriver:
         # Id of post directly chronologically succeeding current one. None if the post is last in channel
         postIdAfter: Optional[Id] = None
 
+    class ProcessPostResult(Enum):
+        NothingRequested = enumerator()
+        NoMorePosts = enumerator()
+        MaxCountReached = enumerator()
+        ConditionReached = enumerator()
+
     # REFACTORME: this function could be simplified, possibly separate downloading from filtering by additional callbacks
-    def processPosts(self, processor: Callable[[Post, 'MattermostDriver.PostHints'], None], channel: Channel = None, *,
-            beforePost: Id = None, afterPost: Id = None,
+    def processPosts(self, processor: Callable[[Post, 'MattermostDriver.PostHints'], None],
+            channel: Optional[Channel] = None, *,
+            beforePost: Optional[Id] = None, afterPost: Optional[Id] = None,
             beforeTime: Optional[Time] = None, afterTime: Optional[Time] = None,
             bufferSize: int = 60, maxCount: int = 0, offset: int = 0,
-            timeDirection: OrderDirection = OrderDirection.Asc):
+            timeDirection: OrderDirection = OrderDirection.Asc,
+            onSkippedPost: Callable[[], None] = (lambda: None)
+            ) -> 'MattermostDriver.ProcessPostResult':
         '''
             Main function to load all channel's posts.
             Loading happens lazily in batches, each post is passed to external callable.
@@ -291,9 +300,10 @@ class MattermostDriver:
             params.update(before=beforePost)
 
         if afterTime and beforeTime and afterTime < beforeTime:
-            return
-        if offset >= channel.messageCount:
-            return
+            return self.ProcessPostResult.NothingRequested
+        # Note that messageCount may be inaccurate
+        # if offset >= channel.messageCount:
+        #     return self.ProcessPostResult.NoMorePosts
 
         page: int = 0
         # How many messages on page shall be ignored (in the download direction)
@@ -303,7 +313,7 @@ class MattermostDriver:
             pageOffset = offset % bufferSize
         else:
             absoluteMessageOffset = channel.messageCount
-            page = channel.messageCount // bufferSize - int(channel.messageCount % bufferSize == 0)
+            page = max(0, channel.messageCount // bufferSize - int(channel.messageCount % bufferSize == 0))
             while True:
                 postWindow = self.get(f'channels/{channelId}/posts', {'per_page': bufferSize, 'page': page})
                 assert isinstance(postWindow, dict)
@@ -315,7 +325,7 @@ class MattermostDriver:
                 break
 
             absoluteMessageOffset = page * bufferSize + len(postWindow['order']) - offset
-            page = absoluteMessageOffset // bufferSize - int(absoluteMessageOffset % bufferSize == 0)
+            page = max(0, absoluteMessageOffset // bufferSize - int(absoluteMessageOffset % bufferSize == 0))
             if offset > channel.messageCount % bufferSize:
                 pageOffset = bufferSize - absoluteMessageOffset % bufferSize
             else:
@@ -329,7 +339,7 @@ class MattermostDriver:
             postWindow = self.get(f'channels/{channelId}/posts', params=params)
             assert isinstance(postWindow, dict)
 
-            finished: bool = False
+            stopReason: Optional[MattermostDriver.ProcessPostResult] = None
 
             if timeDirection == OrderDirection.Desc:
                 for windowIndex, postId in enumerate(postWindow['order'][pageOffset:]):
@@ -337,11 +347,14 @@ class MattermostDriver:
                     postHints.postIdBefore = postWindow['order'][windowIndex + 1] if windowIndex + 1 < len(postWindow['order']) else postWindow['prev_post_id'] if postWindow['prev_post_id'] != '' else None
                     postHints.postIdAfter = postWindow['order'][windowIndex - 1] if windowIndex - 1 >= 0 else postWindow['next_post_id'] if postWindow['next_post_id'] != '' else None
                     if ((afterPost and p['id'] == afterPost)
-                        or (afterTime and p['create_at'] < afterTime.timestamp)
-                        or (maxCount and postHints.processedCount == maxCount)):
-                        finished = True
+                        or (afterTime and p['create_at'] < afterTime.timestamp)):
+                        stopReason = self.ProcessPostResult.ConditionReached
+                        break
+                    if maxCount and postHints.processedCount == maxCount:
+                        stopReason = self.ProcessPostResult.MaxCountReached
                         break
                     if beforeTime and p['create_at'] >= beforeTime.timestamp:
+                        onSkippedPost()
                         continue
                     processor(Post.fromMattermost(p), postHints)
                     postHints.processedCount += 1
@@ -353,11 +366,14 @@ class MattermostDriver:
                     postHints.postIdAfter = postWindow['order'][windowIndex - 1] if windowIndex - 1 >= 0 else postWindow['next_post_id'] if postWindow['next_post_id'] != '' else None
                     windowIndex -= 1
                     if ((beforePost and p['id'] == beforePost)
-                        or (beforeTime and p['create_at'] > beforeTime.timestamp)
-                        or (maxCount and postHints.processedCount == maxCount)):
-                        finished = True
+                        or (beforeTime and p['create_at'] > beforeTime.timestamp)):
+                        stopReason = self.ProcessPostResult.ConditionReached
+                        break
+                    if maxCount and postHints.processedCount == maxCount:
+                        stopReason = self.ProcessPostResult.MaxCountReached
                         break
                     if afterTime and p['create_at'] <= afterTime.timestamp:
+                        onSkippedPost()
                         continue
                     processor(Post.fromMattermost(p), postHints)
                     postHints.processedCount += 1
@@ -370,17 +386,22 @@ class MattermostDriver:
                     page -= 1
                     continue
                 else:
-                    return
+                    return self.ProcessPostResult.NoMorePosts
 
-            if finished or len(postWindow['order']) == 0 or (maxCount and postHints.processedCount >= maxCount):
-                break
+            if stopReason is not None:
+                return stopReason
+            if len(postWindow['order']) == 0:
+                return self.ProcessPostResult.NoMorePosts
+            if maxCount and postHints.processedCount >= maxCount:
+                return self.ProcessPostResult.MaxCountReached
+
             if timeDirection == OrderDirection.Desc:
                 if postWindow['prev_post_id'] == '':
-                    break
+                    return self.ProcessPostResult.NoMorePosts
                 params.update(before = postWindow['order'][-1])
             else:
                 if postWindow['next_post_id'] == '':
-                    break
+                    return self.ProcessPostResult.NoMorePosts
                 params.update(after = postWindow['order'][0])
 
             if page != 0:
@@ -388,7 +409,8 @@ class MattermostDriver:
                 del params['page']
             if pageOffset != 0:
                 pageOffset = 0
-            sleep(self.configfile.throttlingLoopDelay / 1000) # Dump rate limit avoidance
+            if self.configfile.throttlingLoopDelay:
+                sleep(self.configfile.throttlingLoopDelay / 1000) # Dump rate limit avoidance
 
     def getPosts(self, channel: Channel = None, *args, **kwargs) -> List[Post]:
         result = []
