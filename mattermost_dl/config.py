@@ -184,7 +184,7 @@ class ConfigFile:
     throttlingLoopDelay: int = 0
     miscTeams: bool = True
     explicitTeams: List[TeamSpec] = dataclassfield(default_factory=list)
-    miscUserChannels: bool = True
+    miscDirectChannels: bool = True
     explicitUsers: List[ChannelSpec] = dataclassfield(default_factory=list)
     miscGroupChannels: bool = True
     explicitGroups: List[GroupChannelSpec] = dataclassfield(default_factory=list)
@@ -277,8 +277,8 @@ class ConfigFile:
             self.channelDefaults = ChannelOptions().update(config['defaultChannelOptions'])
         else:
             self.channelDefaults = ChannelOptions()
-        if 'directChannelOptions' in config:
-            self.directChannelDefaults = ChannelOptions().update(config['directChannelOptions'])
+        if 'userChannelOptions' in config:
+            self.directChannelDefaults = ChannelOptions().update(config['userChannelOptions'])
         else:
             self.directChannelDefaults = self.channelDefaults
         if 'groupChannelOptions' in config:
@@ -303,7 +303,7 @@ class ConfigFile:
                 for teamDict in config['teams']
             ]
         if 'downloadUserChannels' in config:
-            self.miscUserChannels = config['downloadUserChannels']
+            self.miscDirectChannels = config['downloadUserChannels']
         if 'users' in config:
             assert isinstance(config['users'], list)
             self.explicitUsers = [

@@ -319,7 +319,7 @@
     "defaultChannelOptions": {
       "$ref": "#/definitions/channelPostOptions"
     },
-    "directChannelOptions": {
+    "userChannelOptions": {
       "$ref": "#/definitions/channelPostOptions"
     },
     "groupChannelOptions": {

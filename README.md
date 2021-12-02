@@ -87,7 +87,7 @@ Limit only up to total count of 10000 posts (to limit very spammy channels), wit
     "sessionPostLimit": 1000
   },
   # Override for more specific group of channels
-  "directChannelOptions": {
+  "userChannelOptions": {
     # For personal peer-to-peer channels, we don't want limits
     "maximumPostCount": -1,
     "sessionPostLimit": -1
@@ -284,7 +284,7 @@ Download and keep only last 10 messages:
       "download": true
     }
   },
-  "directChannelOptions": {
+  "userChannelOptions": {
     # Downloading files in public channels could be bad idea
     "attachments": {
       "download": true,
@@ -342,7 +342,7 @@ The format was chosen carefully to be
 - well defined (see provided JSON schemas)
 - optimized for efficient appending (as described earlier)
 
-## How do I see the downloaded messages?
+## How can I see the downloaded messages?
 
 While _presentation_ of the stored data is technically out of scope of this project,
 if you're on Unix-based platform with Bourne shell and [jq](https://github.com/stedolan/jq), you can use simple utilities provided in `scripts/` folder.
