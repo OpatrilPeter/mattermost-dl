@@ -324,6 +324,11 @@ The redownload case can be configured like so:
 - `MATTERMOST_PASSWORD`
 - `MATTERMOST_TOKEN`
 
+## Automation
+
+`mattermost-dl` doesn't have any direct provisions for automatic (scheduled) mode of execution, however, it's not hard to wrap it for any scheduling system capable of running CLI scripts.
+Sample implementation for Bourne shell ([mattermost-dl-job.sh](scripts/mattermost-dl-job.sh)) and related [`cron`](scripts/mattermost-dl.cron) schedule specification is provided.
+
 ## Storage format
 
 Downloaded archives are stored as pair of files containing JSON data, pair for each channel.

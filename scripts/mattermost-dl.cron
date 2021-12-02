@@ -1,0 +1,22 @@
+# Sample specification for cronjob running mattermost-dl noninteractively each day
+# Download failure is handled by generating report in user's directory
+#
+#
+# ┌───────────── minute (0 - 59)
+# │ ┌───────────── hour (0 - 23)
+# │ │ ┌───────────── day of the month (1 - 31)
+# │ │ │ ┌───────────── month (1 - 12)
+# │ │ │ │ ┌───────────── day of the week (0 - 6) (Sunday to Saturday;
+# │ │ │ │ │                                   7 is also Sunday on some systems)
+# │ │ │ │ │
+# │ │ │ │ │
+# * * * * * <command to execute>
+
+MAILTO=""
+
+# Place mattermost-dl-job.sh in PATH or specify full path
+# Note that cron uses minimal conservative PATH, not the one from user's profile!
+# This may be relevant for underlying mattermost-dl binary as well
+# You can enrich the path like so `<timespec> PATH="$PATH:$HOME/.local/bin:/usr/local/bin" mattermost-dl-job.sh <args>`
+
+0 12 * * * mattermost-dl-job.sh --conf /home/username/.config/mattermost-dl.json >"/home/username/mattermost-dl-failed-$(date --iso-8601=minutes | tr ':' '-').txt"
