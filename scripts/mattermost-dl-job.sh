@@ -12,7 +12,7 @@ $0 <OPTS> [-- <EXTRA_ARGS>]
 Options:
   --cwd  <DIR>       Use given current working directory
   --conf  <CONF>     [default: none (inherited from mattermost-dl defaults]
-  --handler <CMD>    [default: printing downloader's output on standard output]
+  --handler <CMD>    [default: printing downloader's output into report file]
                      Describes handling of case where mattermost-dl failed (produced content on
                      standard error output). Takes form of line evaluated as sh script,
                      with following substituable wildcards:
@@ -20,8 +20,14 @@ Options:
                        {date} - time of invocation in format viable for inclusion in filenames
                        {stdout} - temporary file containing downloader's standard output
                        {stderr} - temporary file containing downloader's standard error output
+                       {report} - report file
                      example:
                        'cat {stdout} {stderr} >~/mattermost-dl-fail-report-{date}.txt'
+  --report-file <REPORT>
+                     [default: standard output]
+                     File used for reporting on failed download.
+                     Used as templating parameter of (default) failure handling, being
+                     easier than replacing the entire handler
 EOF
 }
 
@@ -39,7 +45,8 @@ require_tool tr
 
 parse_args() {
     CONFIG_PATH="" # Invalid value
-    ERR_HANDLER="printf 'Invocation of mattermost-dl failed with status code {retcode}.\nProgram output:\n===\n'; cat {stdout}; printf '===\nProgram error output:\n===\n'; cat {stderr}"
+    REPORT_FILE='&1'
+    ERR_HANDLER="(printf 'Invocation of mattermost-dl failed with status code {retcode}.\nProgram output:\n===\n'; cat {stdout}; printf '===\nProgram error output:\n===\n'; cat {stderr}) >{report}"
     EXTRA_ARGS=""
 
     while [ $# -gt 0 ]; do
@@ -75,6 +82,15 @@ parse_args() {
                 ERR_HANDLER="$2"
                 shift
                 ;;
+            --report-file)
+                if [ $# -eq 1 ]; then
+                    echo "Missing argument for '$1'." >&2
+                    print_help
+                    exit 1
+                fi
+                REPORT_FILE="$2"
+                shift
+                ;;
             --)
                 shift
                 EXTRA_ARGS="$@"
@@ -95,24 +111,29 @@ get_date_str() {
     date --iso-8601=minutes | tr ':' '-'
 }
 
+sed_quote() {
+    sed -e 's/[\\\/&]/\\&/g'
+}
+
 TEMP_STDOUT=$(mktemp)
 TEMP_STDERR=$(mktemp)
 trap "rm -f '$TEMP_STDOUT' '$TEMP_STDERR'" EXIT
 
 RETCODE=0
 if [ -z "$CONFIG_PATH" ]; then
-    mattermost-dl --quiet $EXTRA_ARGS >"$TEMP_STDOUT" 2>"$TEMP_STDERR" || RETCODE=$?
+    mattermost-dl $EXTRA_ARGS >"$TEMP_STDOUT" 2>"$TEMP_STDERR" || RETCODE=$?
 else
-    mattermost-dl --conf "$CONFIG_PATH" --quiet $EXTRA_ARGS >"$TEMP_STDOUT" 2>"$TEMP_STDERR" || RETCODE=$?
+    mattermost-dl --conf "$CONFIG_PATH" $EXTRA_ARGS >"$TEMP_STDOUT" 2>"$TEMP_STDERR" || RETCODE=$?
 fi
 
-if [ $RETCODE -gt 0 -o $(stat --printf="%s" "$TEMP_STDERR") -gt 0 ]; then
-    eval $(echo "$ERR_HANDLER" \
-        | sed s/{date}/"$(get_date_str)"/ \
-        | sed s/{retcode}/"$RETCODE"/ \
-        | sed 's|{stdout}|'"$TEMP_STDOUT"'|' \
-        | sed 's|{stderr}|'"$TEMP_STDERR"'|' \
-    )
+if [ $RETCODE -gt 0 ]; then
+    eval "$(printf '%s' "$ERR_HANDLER" \
+        | sed s/{report}/"$(printf '%s' "$REPORT_FILE" | sed_quote)"/g \
+        | sed s/{date}/"$(get_date_str)"/g \
+        | sed s/{retcode}/"$RETCODE"/g \
+        | sed s/{stdout}/"$(printf '%s' "$TEMP_STDOUT" | sed_quote)"/g \
+        | sed s/{stderr}/"$(printf '%s' "$TEMP_STDERR" | sed_quote)"/g \
+    )"
 fi
 
 exit $RETCODE

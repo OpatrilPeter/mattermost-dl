@@ -19,4 +19,4 @@ MAILTO=""
 # This may be relevant for underlying mattermost-dl binary as well
 # You can enrich the path like so `<timespec> PATH="$PATH:$HOME/.local/bin:/usr/local/bin" mattermost-dl-job.sh <args>`
 
-0 12 * * * mattermost-dl-job.sh --conf /home/username/.config/mattermost-dl.json >"/home/username/mattermost-dl-failed-$(date --iso-8601=minutes | tr ':' '-').txt"
+0 12 * * * mattermost-dl-job.sh --conf /home/username/.config/mattermost-dl.json --report-file /home/username/mattermost-dl-failed-$(date --iso-8601=minutes | tr ':' '-').txt
