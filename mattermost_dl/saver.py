@@ -97,7 +97,7 @@ class Saver:
                             u, opts = explicitDirectChannelNames[channel.internalName]
                             wantedDirectChannels.update({u: ChannelRequest(config=opts, metadata=channel)})
                             del explicitDirectChannelNames[channel.internalName]
-                        elif self.configfile.miscUserChannels:
+                        elif self.configfile.miscDirectChannels:
                             otherUser = self.driver.getUserById(self.driver.getUserIdFromDirectChannelName(channel.internalName))
                             wantedDirectChannels.update({otherUser: ChannelRequest(config=self.configfile.directChannelDefaults, metadata=channel)})
                 elif channel.type == ChannelType.Group:
