@@ -55,21 +55,24 @@ def parseArgs() -> ArgNamespace:
     return args
 
 def selectConfigFile() -> Optional[Path]:
+    def suffixes():
+        yield 'toml'
+        yield 'json'
     locations = []
-    confPath = Path('./mattermost-dl.json')
-    if confPath.is_file():
-        return confPath
-    locations.append(confPath)
+    for confPath in (Path(f'./mattermost-dl.{sfx}') for sfx in suffixes()):
+        if confPath.is_file():
+            return confPath
+        locations.append(confPath)
     if 'XDG_CONFIG_HOME' in os.environ:
-        confPath = Path(os.environ['XDG_CONFIG_HOME'])/'mattermost-dl.json'
-        if confPath.is_file():
-            return confPath
-        locations.append(confPath)
+        for confPath in (Path(os.environ['XDG_CONFIG_HOME'])/f'mattermost-dl.{sfx}' for sfx in suffixes()):
+            if confPath.is_file():
+                return confPath
+            locations.append(confPath)
     if 'HOME' in os.environ:
-        confPath = Path(os.environ['HOME'])/'.config/mattermost-dl.json'
-        if confPath.is_file():
-            return confPath
-        locations.append(confPath)
+        for confPath in (Path(os.environ['HOME'])/f'mattermost-dl.{sfx}' for sfx in suffixes()):
+            if confPath.is_file():
+                return confPath
+            locations.append(confPath)
 
     logging.error(f'No configuration file found, searched locations follow: {locations}')
     return None
@@ -84,6 +87,7 @@ def main():
             sys.exit(1)
 
     try:
+        logging.debug(f'Loading confifuration file {args.conf}.')
         conffile = ConfigFile.fromFile(args.conf)
         conffile.updateFromEnv()
         conffile.updateFromArgs(args)

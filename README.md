@@ -15,12 +15,25 @@ Note that there is only one instance of a given direct channel that all Teams sh
 
 ## Usage
 
-`mattermost-dl` is a command-line tool mainly controlled by a single JSON configuration file.
+`mattermost-dl` is a command-line tool mainly controlled by a single JSON or TOML configuration file of equivalent structure.
+Rest of this document will usually use TOML format as it support comments.
 This file is either passed explicitly as argument or read from `mattermost-dl.json` in current working directory, `$XDG_CONFIG_HOME` or `$HOME/.config`.
 
 This configuration file allows high degree of configurability, setting options on level of concrete channels, channel kinds or specific teams. It also makes it easy to run the downloader repeatedly and download only new content since the last run.
 
 The minimal amount of required settings include server's address and appropriate login credentials - the minimalist config may look like this:
+
+```toml
+version = "0"
+
+[connection]
+hostname = "https://mattermost-server.com"
+username = "user.name"
+# password = "swordfish"
+token = "deadb33f"
+```
+
+Or in JSON:
 
 ```json
 {
@@ -28,7 +41,6 @@ The minimal amount of required settings include server's address and appropriate
   "connection": {
     "hostname": "https://mattermost-server.com",
     "username": "user.name",
-    // "password": "swordfish",
     "token": "deadb33f"
   }
 }
@@ -56,8 +68,6 @@ Contents are saved in a directory set by the `output.directory` setting (current
 
 Required connection settings described already above are ommited for posterity.
 
-Note that comments (lines with `#`) are not actually allowed in json.
-
 If your test editor supports json schema based validation and suggestions, I'd recomend setting the configuration like this:
 
 ```json
@@ -66,9 +76,20 @@ If your test editor supports json schema based validation and suggestions, I'd r
 }
 ```
 
-### Download all channels
+### Download all available channels
 
+This constitutes the default behavior and other settings are defined in
 Downloads complete history of all available channels.
+
+What "available" means? All channel user given user has access to. That means all
+
+- channels currently being subscribed to
+- all direct user-user and group channels featuring given user
+- all public channels ever visited
+
+Notably, private channels once left cannot be reentered without the invite
+and therefore can't be downloaded either.
+
 Doesn't download auxiliary data like file attachments or custom emoji.
 
 ```json
@@ -80,147 +101,114 @@ Doesn't download auxiliary data like file attachments or custom emoji.
 
 Limit only up to total count of 10000 posts (to limit very spammy channels), with additional limit for this specific session to 1000 (to make the update faster).
 
-```json
-{
-  "defaultChannelOptions": {
-    "maximumPostCount": 10000,
-    "sessionPostLimit": 1000
-  },
-  # Override for more specific group of channels
-  "userChannelOptions": {
-    # For personal peer-to-peer channels, we don't want limits
-    "maximumPostCount": -1,
-    "sessionPostLimit": -1
-  }
-  "users": [
-    {
-      "name": "spammy.mcperson",
-      # We can override settings per individual channel
-      "sessionPostLimit": 100
-    }
-  ]
-}
+```toml
+[defaultChannelOptions]
+maximumPostCount = 10000
+sessionPostLimit = 1000
+
+# Override for more specific group of channels
+[userChannelOptions]
+# For personal peer-to-peer channels, we don't want limits
+maximumPostCount = -1
+sessionPostLimit = -1
+
+[[users]]
+name = "spammy.mcperson"
+# We can override settings per individual channel
+sessionPostLimit = 100
 ```
 
-Note that more specific channel settings, if present, _completely replace_ more general settings - settings are not merged.
+Note that more specific channel settings, if present, _completely replace_ more general settings - settings are not merged member by member.
 
 Download all private channels, but only selected public channels.
 
-```json
-{
-  # Without this, all teams are downloaded - list in "teams" just specifies overrides
-  # With this, only teams mentioned in "teams" are downloaded
-  "downloadTeams": false,
-  "teams": [
-    {
-      "team": {"name": "Team"},
-      "downloadPublicChannels": false,
-      "publicChannels": [
-        {"internalName": "public1"},
-        {"internalName": "public2"}
-      ],
-      "publicChannelOptions": {
-        # We only want a sample of those public channels
-        "sessionPostLimit": 100
-      }
-    }
-  ]
-}
+```toml
+# Without this, all teams are downloaded - list in "teams" just specifies overrides
+# With this, only teams mentioned in "teams" are downloaded
+downloadTeams = false
+
+[publicChannelOptions]
+# We only want a sample of those public channels
+sessionPostLimit = 100
+
+[[teams]]
+team.name = "Team"
+downloadPublicChannels = false
+publicChannels: [
+  {internalName = "public1"},
+  {internalName = "public2"}
+]
 ```
 
 ### Download specific channel
 
 Public/private channel:
 
-```json
-{
-  # Download only explicitly chosen channels
-  "downloadTeams": false,
-  "downloadUserChannels": false,
-  "downloadGroupChannels": false,
+```toml
+# Download only explicitly chosen channels
+downloadTeams = false
+downloadUserChannels = false
+downloadGroupChannels = false
 
-  "teams": [
-    {
-      "team": {
-        "name": "Team"
-        # We could also identify team by its internal name - `internalName` (which is unambiguous) or internal id
-      },
-      # Again, download only explicitly chosen channels
-      "downloadPublicChannels": false,
-      "downloadPrivateChannels": false,
+[[teams]]
+ We could also identify team by its `internalName` (which is unambiguous) or internal id
+tean.name = "Team"
+# Again, download only explicitly chosen channels
+downloadPublicChannels = false
+downloadPrivateChannels = false
 
-      # Or `privateChannels`
-      "publicChannels": [
-        {
-          "name": "Channel name"
-          # Channel specific download constraints go here
-        }
-      ]
-    }
-  ]
-}
+# Settings for specific public channels. Equvalently we could specify `privateChannels`
+[[teams.publicChannels]]
+name = "Channel name"
+# Channel specific download constraints go here
+
+[[teams.publicChannels]]
+name = "Another channel under team Team"
 ```
 
 Group channel:
 
-```json
-{
-  "groups": [
-    {
-      "group": [
-        {"name": "member user 1"},
-        {"name": "member user 2"},
-        {"name": "member user 3"}
-      ],
-      # Usual channel options are supported
-      "downloadFromOldest": false
-    },
-    {
-      "group": "abcdef" # Channel Id is also supported
-    }
-  ]
-}
+```toml
+[[groups]]
+group = [
+  {name = "member user 1"},
+  {name = "member user 2"},
+  {name = "member user 3"}
+]
+# Usual channel options are supported
+downloadFromOldest = false
+
+[[groups]]
+# We could specify group by usual Channel Id as well
+group = "abcdef"
 ```
 
 Direct (one-on-one, user-specific) channel:
 
-```json
-{
-  # To stop downloading OTHER user cannels
-  "downloadUserChannels": false,
+```toml
+# To stop downloading OTHER user cannels
+downloadUserChannels = false
 
-  "users": [
-    {
-      "name": "username",
-      # Usual channel options are supported
-    }
-  ]
-}
+[[users]]
+name = "username"
+# Usual channel options are supported
 ```
 
 Skip downloading specific channel:
 
-```json
-{
-  "users": [
-    {
-      "name": "unwanted-chatter",
-      "maximumPostCount": 0
-    }
-  ]
-}
+```toml
+[[users]]
+name = "unwanted-chatter"
+maximumPostCount = 0
 ```
 
 ### Download only messages in some time range
 
 Download things after date:
 
-```json
-{
-  "defaultChannelOptions": {
-    "afterTime": "1970-01-01"
-  }
-}
+```toml
+[defaultChannelOptions]
+afterTime = "1970-01-01"
 ```
 
 Available time formats are:
@@ -230,72 +218,53 @@ Available time formats are:
 
 Download things in interval:
 
-```json
-{
-  "defaultChannelOptions": {
-    "afterTime": "1970-01-01",
-    "beforeTime": "2000-01-01"
-  }
-}
+```toml
+[defaultChannelOptions]
+afterTime = "1970-01-01"
+beforeTime = "2000-01-01"
 ```
 
 Download thing after specific post:
 
-```json
-{
-  "defaultChannelOptions": {
-    "afterPost": "abcdef" # Post Id
-  }
-}
+```toml
+[defaultChannelOptions]
+afterPost = "abcdef" # Post Id
 ```
 
 Download and keep only last 10 messages:
 
 ```json
-{
-  "users": [
-    {
-      "name": "username",
-      "downloadFromOldest": false,
-      "messageCount": 10,
-      "onExistingIncompatible": "delete"
-    }
-  ]
-}
+[[users]]
+name = "username"
+downloadFromOldest = false
+messageCount = 10
+onExistingIncompatible = "delete"
 ```
 
 ### Download everything we can
 
-```json
-{
-  # These are on by default
-  "downloadTeams": true,
-  "downloadUserChannels": true,
-  "downloadGroupChannels": true,
+```toml
+# These are on by default
+downloadTeams = true
+downloadUserChannels = true
+downloadGroupChannels = true
 
-  # Custom (non-builtin) emojis can be downloaded either completely this way or just the ones being used (in channel options)
-  "downloadEmojis": true,
+# Custom (non-builtin) emojis can be downloaded either completely this way or just the ones being used (in channel options)
+downloadEmojis = true
 
-  "defaultChannelOptions": {
-    "emojis": {
-      "download": true
-    },
-    "avatars": {
-      "download": true
-    }
-  },
-  "userChannelOptions": {
-    # Downloading files in public channels could be bad idea
-    "attachments": {
-      "download": true,
-      # Optional sanity filters
-      "maxSize": 10485760, # 10MB
-      "allowedMimeTypes": [
-        "application/pdf"
-      ]
-    }
-  }
-}
+[defaultChannelOptions]
+# Downloading files blindly in public channels could be bad idea
+attachments.download = false # Is false by default
+avatars.download = true
+emojis.download = true
+
+[userChannelOptions.attachments]
+download = true
+# Optional sanity filters
+maxSize = 10485760 # 10MB
+allowedMimeTypes = [
+  "application/pdf"
+]
 ```
 
 ### Reduce backup creation
@@ -306,15 +275,12 @@ Those backups can be distingushed by having `--backup` in their name and should 
 
 The redownload case can be configured like so:
 
-```json
-{
-  "defaultChannelOptions": {
-    # If we can append into current archive, should we do it or redownload from scratch?
-    "onExistingCompatible": "update",
-    # If we do have to redownload, don't keep old archive
-    "onExistingIncompatible": "delete"
-  }
-}
+```toml
+[defaultChannelOptions]
+# If we can append into current archive, should we do it or redownload from scratch?
+onExistingCompatible = "update"
+# If we do have to redownload, don't keep old archive
+onExistingIncompatible = "delete"
 ```
 
 ## Supported environmental variables

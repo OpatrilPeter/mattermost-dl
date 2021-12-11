@@ -6,7 +6,7 @@
 from .common import *
 from .bo import EntityLocator, Id, Time
 from . import jsonvalidation
-from .jsonvalidation import validate as validateJson, formatValidationErrors
+from .jsonvalidation import ValidationErrors, validate as validateJson, formatValidationErrors
 from . import progress
 from .progress import ProgressSettings
 from .recovery_actions import RBackup, RDelete, RReuse, RSkipDownload
@@ -16,7 +16,6 @@ from collections.abc import Iterable
 import json
 from json.decoder import JSONDecodeError
 import jsonschema
-import traceback
 
 
 class LogVerbosity(Enum):
@@ -208,34 +207,64 @@ class ConfigFile:
             return jsonschema.Draft7Validator(json.load(schemaFile))
 
     @staticmethod
-    def fromFile(filename: Path) -> 'ConfigFile':
+    def loadFile(filename: Path) -> Any:
+        '''
+            Loads Json or supported Json-like structured data from file.
+            Raises ConfigurationError on failure
+        '''
+        ftype = '.json'
+        if filename.suffix in ('.json', '.toml'):
+            ftype = filename.suffix
+        else:
+            if filename.suffix == '':
+                logging.warning('Missing configuration suffix, assuming json.')
+            else:
+                logging.warning(f'Unrecognized configuration suffix "{filename.suffix}", assuming json.')
+
         with open(filename) as f:
-            try:
-                config = json.load(f)
-            except JSONDecodeError as err:
-                logging.error(exceptionFormatter('Failed to load configuration file.'))
-                raise ConfigurationError(filename) from err
+            if ftype == '.json':
+                try:
+                    config = json.load(f)
+                except JSONDecodeError as err:
+                    logging.error(exceptionFormatter('Failed to load configuration file.'))
+                    raise ConfigurationError(filename) from err
+            else:
+                assert ftype == '.toml'
+                import toml # Late import as this feature is otherwise optional
 
-            def onWarning(w):
-                logging.warning(f"Encountered warning '{w}', configuration may not be correctly loadable.")
-            def onError(e):
-                if isinstance(e, jsonvalidation.BadObject):
-                    logging.error(f"Failed to load configuration, loaded json object has unsupported type {e.recieved}.")
-                else:
-                    assert isinstance(e, Iterable)
-                    logging.error("Configuration didn't match expected schema. " + formatValidationErrors(e))
-                raise ConfigurationError(filename=filename)
+                try:
+                    config = toml.load(f)
+                except toml.TomlDecodeError as err:
+                    logging.error(exceptionFormatter('Failed to load configuration file.'))
+                    raise ConfigurationError(filename) from err
 
-            validateJson(config, ConfigFile._schemaValidator,
-                acceptedVersion='0',
-                onWarning=onWarning,
-                onError=onError,
-            )
+        return config
 
-            return ConfigFile.fromJson(config)
+    @classmethod
+    def fromFile(cls, filename: Path) -> 'ConfigFile':
+        config = cls.loadFile(filename)
+
+        def onWarning(w):
+            logging.warning(f"Encountered warning '{w}', configuration may not be correctly loadable.")
+        def onError(e: ValidationErrors):
+            if isinstance(e, jsonvalidation.BadObject):
+                logging.error(f"Failed to load configuration, loaded json object has unsupported type {e.recieved}.")
+            else:
+                assert isinstance(e, Iterable)
+                logging.error("Configuration didn't match expected schema. " + formatValidationErrors(e))
+            raise ConfigurationError(filename=filename)
+
+        validateJson(config, ConfigFile._schemaValidator,
+            acceptedVersion='0',
+            onWarning=onWarning,
+            onError=onError,
+        )
+        assert isinstance(config, Mapping)
+
+        return ConfigFile.fromJson(config)
 
     @staticmethod
-    def fromJson(config: dict) -> 'ConfigFile':
+    def fromJson(config: Mapping) -> 'ConfigFile':
         self = cast(ConfigFile, ClassMock())
         if 'connection' in config:
             connection = config['connection']

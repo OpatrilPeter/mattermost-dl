@@ -1,0 +1,76 @@
+# This is sample configuration that downloads few speciic channels
+
+version = "0"
+
+downloadTeams=false
+downloadGroupChannels=false
+downloadUserChannels=false
+
+[connection]
+hostname = "https://mattermost-server.com"
+usedApi = 4
+username = "user.name"
+token = "76vnm1dwpo08v1f0etc5tp49mgn4pma1"
+
+[throttling]
+loopDelay = 100
+
+[output]
+# Relative to current working directory
+directory = "./mattermost-backup"
+
+[report]
+progressInterval=5000
+
+[privateChannelOptions]
+maximumPostCount = 10000
+
+[[users]]
+name = "spike.spiegel"
+beforeTime = "2001-11-26"
+
+[[users]]
+name = "jet.black"
+sessionPostLimit = 1000
+
+[[users]]
+name = "faye.valentine"
+attachments.download = true
+attachments.maxSize = 1000000
+
+[[groups]]
+group = [
+    {name = "spike.spiegel"},
+    {name = "jet.black"},
+    {name = "faye.valentine"}
+]
+# Combining conditions
+afterPost = "s01e05" # Post Id
+beforeTime = "2001-11-26"
+
+[[teams]]
+team.internalName = "yutani"
+downloadPublicChannels = true # All available _public_ channels
+downloadPrivateChannels = false
+
+[[teams.privateChannels]]
+internalName = "nostromo"
+# Settings inherited from privateChannelOptions
+
+[[teams.privateChannels]]
+internalName = "acheron"
+maximumPostCount = -1 # Explicit overriding of privateChannelOptions
+# Don't download custom emoji occuring in this channel
+emoji.download = false
+
+[[teams.privateChannels]]
+name = "Fiorina 161"
+# Fetch 10 latest posts
+downloadFromOldest = false
+maximumPostCount = 10
+
+[[teams.privateChannels]]
+internalName = "auriga"
+# Starting from scratch
+onExistingCompatible = "delete"
+onExistingIncompatible = "delete"
