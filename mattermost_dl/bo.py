@@ -666,6 +666,7 @@ class Channel(JsonMessage):
         ch.drop('team_id')
         ch.drop('extra_update_at')
         ch.drop('group_constrained')
+        ch.drop('last_root_post_at')
 
         ch.cleanMisc()
 
