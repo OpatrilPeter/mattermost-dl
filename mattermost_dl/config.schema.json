@@ -106,6 +106,8 @@
         },
         "attachments": {
           "type": "object",
+          "additionalProperties": false,
+          "additionalPropertiesWarn": true,
           "properties": {
             "download": {
               "description": "Whether to download file attachments or not. Defaults to false.",
@@ -127,6 +129,8 @@
         },
         "emojis": {
           "type": "object",
+          "additionalProperties": false,
+          "additionalPropertiesWarn": true,
           "properties": {
             "download": {
               "description": "Whether to download used custom emojis or not (default).",
@@ -140,6 +144,8 @@
         },
         "avatars": {
           "type": "object",
+          "additionalProperties": false,
+          "additionalPropertiesWarn": true,
           "properties": {
             "download": {
               "description": "Whether to download user icons (avatars) or not (default).",
@@ -150,6 +156,9 @@
       }
     }
   },
+  "type": "object",
+  "additionalProperties": false,
+  "additionalPropertiesWarn": true,
   "required": [
     "version"
   ],
@@ -165,6 +174,8 @@
     "connection": {
       "description": "Contains all needed to set up a connection with the server.",
       "type": "object",
+      "additionalProperties": false,
+      "additionalPropertiesWarn": true,
       "properties": {
         "hostname": {
           "description": "Mattermost server url used as prefix to api calls.",
@@ -203,6 +214,7 @@
           "team"
         ],
         "additionalProperties": false,
+        "additionalPropertiesWarn": true,
         "properties": {
           "team": {
             "$ref": "#/definitions/entityLocator"
@@ -246,13 +258,19 @@
             }
           },
           "defaultChannelOptions": {
-            "$ref": "#/definitions/channelPostOptions"
+            "$ref": "#/definitions/channelPostOptions",
+            "additionalProperties": false,
+            "additionalPropertiesWarn": true
           },
           "publicChannelOptions": {
-            "$ref": "#/definitions/channelPostOptions"
+            "$ref": "#/definitions/channelPostOptions",
+            "additionalProperties": false,
+            "additionalPropertiesWarn": true
           },
           "privateChannelOptions": {
-            "$ref": "#/definitions/channelPostOptions"
+            "$ref": "#/definitions/channelPostOptions",
+            "additionalProperties": false,
+            "additionalPropertiesWarn": true
           }
         }
       }
@@ -265,7 +283,7 @@
       "description": "List of users we want to save private conversations with.",
       "type": "array",
       "items": {
-        "allOf": [
+        "anyOf": [
           {
             "description": "Identification of the user.",
             "$ref": "#/definitions/entityLocator"
@@ -317,19 +335,29 @@
       "type": "boolean"
     },
     "defaultChannelOptions": {
-      "$ref": "#/definitions/channelPostOptions"
+      "$ref": "#/definitions/channelPostOptions",
+      "additionalProperties": false,
+      "additionalPropertiesWarn": true
     },
     "userChannelOptions": {
-      "$ref": "#/definitions/channelPostOptions"
+      "$ref": "#/definitions/channelPostOptions",
+      "additionalProperties": false,
+      "additionalPropertiesWarn": true
     },
     "groupChannelOptions": {
-      "$ref": "#/definitions/channelPostOptions"
+      "$ref": "#/definitions/channelPostOptions",
+      "additionalProperties": false,
+      "additionalPropertiesWarn": true
     },
     "privateChannelOptions": {
-      "$ref": "#/definitions/channelPostOptions"
+      "$ref": "#/definitions/channelPostOptions",
+      "additionalProperties": false,
+      "additionalPropertiesWarn": true
     },
     "publicChannelOptions": {
-      "$ref": "#/definitions/channelPostOptions"
+      "$ref": "#/definitions/channelPostOptions",
+      "additionalProperties": false,
+      "additionalPropertiesWarn": true
     },
     "throttling": {
       "type": "object",
@@ -343,6 +371,8 @@
     },
     "output": {
       "type": "object",
+      "additionalProperties": false,
+      "additionalPropertiesWarn": true,
       "properties": {
         "directory": {
           "type": "string"
@@ -359,6 +389,8 @@
     },
     "report": {
       "type": "object",
+      "additionalProperties": false,
+      "additionalPropertiesWarn": true,
       "properties": {
         "verbosity": {
           "description": "Chooses level of information that program outputs.\n0 - quiet mode, only problems are shown\n1 - default mode, optimal for user facing interactive use\n2 - verbose mode with extra information, useful for debugging",

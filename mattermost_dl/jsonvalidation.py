@@ -30,6 +30,14 @@ class InvalidVersion:
     def __str__(self) -> str:
         return f"unrecognized version {self.found} is not in expected format (a string matching /\\d+(\\.\\d+){0,2}/ regex)"
 
+@dataclass
+class UnknownOption:
+    message: str
+    path: Iterable[str]
+
+    def __str__(self) -> str:
+        return f'unknown configuration option at #/{"/".join(elem for elem in self.path)}: {self.message}'
+
 class MissingVersion:
     def __str__(self) -> str:
         return "missing versioning information, it may not be loadable and some data may be lost"
@@ -43,12 +51,13 @@ ValidationWarnings = Union[
     MissingVersion,
     UnsupportedVersion,
     InvalidVersion,
+    UnknownOption,
 ]
 
 def formatValidationErrors(errors: Iterable[ValidationError]) -> str:
     errorMessage = 'List of errors follows:\n'
     for error in errors:
-        errorMessage += f'  error: {error.message} at #/{"/".join(error.absolute_path)}\n'
+        errorMessage += f'  error: {error.message} at #/{"/".join(str(elem) for elem in error.absolute_path)}\n'
         errorMessage += f'    invalid part: {error.instance}\n'
     return errorMessage
 
@@ -75,6 +84,14 @@ def validate(jsonObject: Any, validator: Draft7Validator,
 
     # This actually performs the validation
     validationErrors = [error for error in validator.iter_errors(jsonObject)]
+    filteredValidationErrors = []
+    for error in validationErrors:
+        if (error.validator == 'additionalProperties'
+            and error.schema.get('additionalPropertiesWarn', None) is not None):
+            onWarning(UnknownOption(message=error.message, path=[str(elem) for elem in error.path]))
+            continue
+        filteredValidationErrors.append(error)
+    validationErrors = filteredValidationErrors
     if len(validationErrors) > 0:
         onError(validationErrors)
     return jsonObject
