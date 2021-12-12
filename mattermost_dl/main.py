@@ -74,7 +74,7 @@ def selectConfigFile() -> Optional[Path]:
                 return confPath
             locations.append(confPath)
 
-    logging.error(f'No configuration file found, searched locations follow: {locations}')
+    logging.warning(f'No configuration file found, searched locations follow: {locations}')
     return None
 
 def main():
@@ -83,18 +83,19 @@ def main():
 
     if args.conf is None:
         args.conf = selectConfigFile()
-        if args.conf is None:
-            sys.exit(1)
 
     try:
-        logging.debug(f'Loading confifuration file {args.conf}.')
-        conffile = ConfigFile.fromFile(args.conf)
+        if args.conf is not None:
+            logging.debug(f'Loading confifuration file {args.conf}.')
+            conffile = ConfigFile.fromFile(args.conf)
+        else:
+            conffile = ConfigFile()
         conffile.updateFromEnv()
         conffile.updateFromArgs(args)
         conffile.validate()
     except ConfigurationError as err:
-        if err.filename is not None:
-            logging.fatal(f'Configuration file {err.filename} failed to be be loaded.')
+        if args.conf is not None:
+            logging.fatal(f'Configuration file {args.conf} failed to be be loaded.')
         else:
             logging.fatal(f'Configuration failed to be be loaded.')
         sys.exit(1)

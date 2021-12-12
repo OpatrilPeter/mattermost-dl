@@ -16,6 +16,8 @@ from collections.abc import Iterable
 import json
 from json.decoder import JSONDecodeError
 import jsonschema
+# HACK: Pyright linter doesn't recognize special meaning of ClassVar from .common in dataclasses
+from typing import ClassVar
 
 
 class LogVerbosity(Enum):
