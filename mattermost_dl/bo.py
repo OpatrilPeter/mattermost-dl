@@ -1,6 +1,6 @@
 '''
     Defines "business objects",
-    OOP representations of Mattermost entities
+    OOP model representations of Mattermost entities
 '''
 
 __all__ = [

@@ -170,12 +170,14 @@ class MattermostDriver:
             t.channels.update({ch.id: ch})
 
     def getChannelById(self, channelId: Id, teamId: Id = None) -> Channel:
-        if not teamId:
+        if teamId is None:
             teamId = self.context['teamId']
+            assert teamId is not None
         return self.cache.teams[teamId].channels[channelId]
     def getChannelByName(self, name: str, teamId: Id = None) -> Channel:
-        if not teamId:
+        if teamId is None:
             teamId = self.context['teamId']
+            assert teamId is not None
         for channel in self.cache.teams[teamId].channels.values():
             if channel.name == name:
                 return channel
