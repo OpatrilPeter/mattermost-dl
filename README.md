@@ -13,11 +13,41 @@ The basic entity is a communication Channel, where various Users add Posts. Post
 
 Note that there is only one instance of a given direct channel that all Teams share.
 
+## Installation
+
+This is a conventional Python utility installable via `setuptools`.
+
+Possible ways to install directly from sources are following:
+
+```sh
+# (recommended) Through pip, user-wide
+pip install --user .
+# Through pip, system-wide. May require elevated privileges
+pip install .
+
+# (advanced) By executing setuptools script directly, if pip/versioning is not possible
+python setup.py install
+
+# For developers: editable install, so changed sources reflect immediately
+pip install -e .
+# or
+python setup.py develop
+```
+
+Dependencies should be downloaded automatically.
+
+After installation, `mattermost-dl` should be available from command line.
+Alternatively, running the module directly should also be possible:
+
+```sh
+python -m mattermost_dl
+```
+
 ## Usage
 
 `mattermost-dl` is a command-line tool mainly controlled by a single JSON or TOML configuration file of equivalent structure.
 Rest of this document will usually use TOML format as it support comments.
-This file is either passed explicitly as argument or read from `mattermost-dl.json` in current working directory, `$XDG_CONFIG_HOME` or `$HOME/.config`.
+This file is either passed explicitly as argument or read from `mattermost-dl.toml`/`mattermost-dl.json` in current working directory, `$XDG_CONFIG_HOME` or `$HOME/.config`.
 
 This configuration file allows high degree of configurability, setting options on level of concrete channels, channel kinds or specific teams. It also makes it easy to run the downloader repeatedly and download only new content since the last run.
 
@@ -313,7 +343,9 @@ The format was chosen carefully to be
 - well defined (see provided JSON schemas)
 - optimized for efficient appending (as described earlier)
 
-## How can I see the downloaded messages?
+## Frequently asked questions
+
+### How can I display the downloaded messages?
 
 While _presentation_ of the stored data is technically out of scope of this project,
 if you're on Unix-based platform with Bourne shell and [jq](https://github.com/stedolan/jq), you can use simple utilities provided in `scripts/` folder.
@@ -322,6 +354,19 @@ Notably,
 
 - `read-channel.sh` will format message contents to the terminal as basic viewer (not necessarily with all possible information)
 - `to-discord-tracker.sh` will perform lossy conversion to format used by [Discord History Tracker](https://github.com/chylex/Discord-History-Tracker)'s archives, a project of similar intent that comes with offline HTML based archive viewer
+
+### Why does download of long channel with certain time constraints take such long time to start?
+
+Current Mattermost API is suited for fetching posts from latest to oldest and only certain constraints can be evaluated serverside.
+In certain cases, such as "downloading from oldest, grab 100 posts after certain date.", we must actually process all posts from the channel begginning right until the time condition starts passing.
+In general, it's very fast to download posts before or after some explicit post, which makes successive downloads (fetching updates) much faster.
+
+### What does "upper limit approximate" means during download?
+
+In many cases, it's unclear or impractical to calculate how many posts will actually be downloaded.
+For example, if our selection condition is arbitrary such as "1000 posts after date 2020-01-01" - we don't know until how many messages would match that.
+Sometimes, we may have an estimation; for example, hard limit of 10 posts mean we surely won't get _more_ than 10, but we still don't know if less than 10 are really available.
+Likewise, Mattermost server may provide total number of channel's posts, but this count doesn't have to reflect what we can actually download even if we're downloading the whole channel, as it's approximate - for example, deleted posts are not fetched.
 
 ## Internal design
 
@@ -338,6 +383,10 @@ Additionally, as this project served as personal evaluation of coding styles, I'
 - do not typically name private methods with prefix underscore - rationale is decreased readibility that isn't worth it, especially as this module is not primarily intended to be library.
   The only methods that ought to be marked private would be those that could break class invariants. Usage of the class ought to be still clear, though, documented in class if needed
 - line wrapping is capped on around 110 as a soft limit, actual wrapping is judged on case-by-case basis
+
+## Project status
+
+After 1.0 release there are currently no guarantees for further active development, aside from bugfixes. That notably includes support for possible later Mattermost APIs.
 
 ## References
 

@@ -1,7 +1,7 @@
 # Todo list
 
-## 1.0
+## Future versions
 
 ### feat
 
-- stabilize versions of config and store
+- grouping channel selection in configuration by user-defined "sidebar categories"
