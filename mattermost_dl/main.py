@@ -58,21 +58,25 @@ def selectConfigFile() -> Optional[Path]:
     def suffixes():
         yield 'toml'
         yield 'json'
-    locations = []
+    locations = set()
     for confPath in (Path(f'./mattermost-dl.{sfx}') for sfx in suffixes()):
         if confPath.is_file():
             return confPath
-        locations.append(confPath)
+        locations.add(confPath)
     if 'XDG_CONFIG_HOME' in os.environ:
         for confPath in (Path(os.environ['XDG_CONFIG_HOME'])/f'mattermost-dl.{sfx}' for sfx in suffixes()):
             if confPath.is_file():
                 return confPath
-            locations.append(confPath)
+            locations.add(confPath)
     if 'HOME' in os.environ:
+        for confPath in (Path(os.environ['HOME'])/f'.config/mattermost-dl.{sfx}' for sfx in suffixes()):
+            if confPath.is_file():
+                return confPath
+            locations.add(confPath)
         for confPath in (Path(os.environ['HOME'])/f'mattermost-dl.{sfx}' for sfx in suffixes()):
             if confPath.is_file():
                 return confPath
-            locations.append(confPath)
+            locations.add(confPath)
 
     logging.warning(f'No configuration file found, searched locations follow: {locations}')
     return None
