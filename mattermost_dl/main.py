@@ -7,7 +7,7 @@ assert version_info >= (3, 7), "Required at least python 3.7, executed with vers
 
 from .common import *
 from .config import ConfigFile, ConfigurationError, LogVerbosity
-from .saver import Saver
+from .saver import Saver, SavingFailed
 
 
 def setupLogging(verbosity: LogVerbosity):
@@ -86,7 +86,7 @@ def main():
 
     try:
         if args.conf is not None:
-            logging.debug(f'Loading confifuration file {args.conf}.')
+            logging.debug(f'Loading configuration file {args.conf}.')
             conffile = ConfigFile.fromFile(args.conf)
         else:
             conffile = ConfigFile()
@@ -103,6 +103,18 @@ def main():
 
     try:
         Saver(conffile)()
+    except SavingFailed as err:
+        logging.fatal(err)
+        if conffile.verbosity == LogVerbosity.Verbose:
+            text = ''
+            while hasattr(err, '__cause__'):
+                err = err.__cause__
+                if err is None:
+                    break
+                text += f'Caused by: {err}'
+            logging.fatal(text)
+
+        sys.exit(1)
     except:
         logging.info("-----\n")
         logging.fatal("Application encountered unexpected situation and will terminate, sorry for inconvenience.\nFollowing information can be useful for developers:")

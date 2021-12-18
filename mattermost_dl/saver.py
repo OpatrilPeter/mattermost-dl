@@ -22,6 +22,17 @@ class ChannelRequest:
     def __hash__(self) -> int:
         return hash(self.metadata.id)
 
+class SavingFailed(Exception):
+    '''
+        Invocation of Saver failed due to known external problem, such as failing to log in.
+        Unlike logical errors, dumping stack trace to users is not necessary.
+
+        Should stringify into problem description and if caused by internal exception that
+        may provide additional info, such subexception may be chained into it.
+    '''
+    pass
+
+
 class Saver:
     '''
         Main class responsible for orchestrating the downloading process.
@@ -1064,6 +1075,9 @@ class Saver:
         self.processChannel(channelOutfile=channelOutfile, header=header, channelRequest=channelRequest)
 
     def __call__(self):
+        '''
+            Entrypoint of the Saver logic. Throws SavingFailed on known errors.
+        '''
         if not self.configfile.outputDirectory.is_dir():
             self.configfile.outputDirectory.mkdir()
         m = self.driver
@@ -1073,16 +1087,14 @@ class Saver:
             if self.configfile.token == '':
                 m.login()
             self.user = m.loadLocalUser()
-        except Exception:
-            logging.error("Failed to log in. Check your credentials.")
-            return
+        except Exception as e:
+            raise SavingFailed("Failed to log in. Check your credentials.") from e
 
         try:
             logging.info('Collecting metadata about available teams ...')
             teams = m.getTeams()
             if len(teams) == 0:
-                logging.fatal(f'User {self.configfile.username} is not member of any teams!')
-                return
+                raise SavingFailed(f'User {self.configfile.username} is not member of any teams!')
 
             logging.info('Collecting metadata about available channels ...')
             for team in teams.values():
