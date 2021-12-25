@@ -15,23 +15,27 @@ Note that there is only one instance of a given direct channel that all Teams sh
 
 ## Installation
 
-This is a conventional Python utility installable via `setuptools`.
+This is a conventional Python utility installable via `setuptools` module, typically by `pip`, Python package manager.
 
-Possible ways to install directly from sources are following:
+This program is not available on its standard repository, as I make commitment to compatibility with future Mattermost versions.
+Possible ways to install it directly from downloaded sources are following:
 
 ```sh
+# Assumes your python instalation provides python and pip binaries in standard path
+cd path/to/downloded/sources/mattermost-dl
+
+# Now, any of the following commands should work
+
 # (recommended) Through pip, user-wide
 pip install --user .
 # Through pip, system-wide. May require elevated privileges
 pip install .
 
-# (advanced) By executing setuptools script directly, if pip/versioning is not possible
-python setup.py install
-
 # For developers: editable install, so changed sources reflect immediately
 pip install -e .
-# or
+# or by invoking setup.py direcrly (useful as user-wide editable installs don't work in some pip versions - https://github.com/pypa/pip/issues/7953)
 python setup.py develop
+python setup.py --user develop
 ```
 
 Dependencies should be downloaded automatically.
@@ -47,7 +51,7 @@ python -m mattermost_dl
 
 `mattermost-dl` is a command-line tool mainly controlled by a single JSON or TOML configuration file of equivalent structure.
 Rest of this document will usually use TOML format as it support comments.
-This file is either passed explicitly as argument or read from `mattermost-dl.toml`/`mattermost-dl.json` in current working directory, `$XDG_CONFIG_HOME` or `$HOME/.config`.
+This file is either passed explicitly as argument or read from `mattermost-dl.toml`/`mattermost-dl.json` in current working directory, `$XDG_CONFIG_HOME`, `$HOME/.config` or `$HOME`.
 
 This configuration file allows high degree of configurability, setting options on level of concrete channels, channel kinds or specific teams. It also makes it easy to run the downloader repeatedly and download only new content since the last run.
 
@@ -96,31 +100,29 @@ Contents are saved in a directory set by the `output.directory` setting (current
 
 ## Configuration examples
 
-Required connection settings described already above are ommited for posterity.
+Required connection settings (described already above) are ommited for posterity.
 
 If your test editor supports json schema based validation and suggestions, I'd recomend setting the configuration like this:
 
 ```json
 {
-  "$schema": "path/to/json/schema/file/config.schema.json"
+  "$schema": "path/to/json/schema/file/mattermost-dl/mattermost_dl/config.schema.json"
 }
 ```
 
 ### Download all available channels
 
-This constitutes the default behavior and other settings are defined in
-Downloads complete history of all available channels.
+This constitutes the default behavior and other settings are defined as overrides or amends of this behavior.
 
 What "available" means? All channel user given user has access to. That means all
 
 - channels currently being subscribed to
 - all direct user-user and group channels featuring given user
-- all public channels ever visited
 
-Notably, private channels once left cannot be reentered without the invite
-and therefore can't be downloaded either.
+Notably, left public & private channels aren't downloaded and private channels
+once left cannot be reentered without the invite.
 
-Doesn't download auxiliary data like file attachments or custom emoji.
+> Downloads posts, not auxiliary data like file attachments or custom emoji.
 
 ```json
 {
@@ -129,7 +131,7 @@ Doesn't download auxiliary data like file attachments or custom emoji.
 
 ### Customize download options for groups of channels
 
-Limit only up to total count of 10000 posts (to limit very spammy channels), with additional limit for this specific session to 1000 (to make the update faster).
+> Limit only up to total count of 10000 posts (to limit very spammy channels), with additional limit for this specific session to 1000 (to make the update faster).
 
 ```toml
 [defaultChannelOptions]
@@ -148,14 +150,14 @@ name = "spammy.mcperson"
 sessionPostLimit = 100
 ```
 
-Note that more specific channel settings, if present, _completely replace_ more general settings - settings are not merged member by member.
+Note that more specific channel download settings, if present, override more general settings.
 
-Download all private channels, but only selected public channels.
+> Download all private channels, but only selected public channels.
 
 ```toml
 # Without this, all teams are downloaded - list in "teams" just specifies overrides
 # With this, only teams mentioned in "teams" are downloaded
-downloadTeams = false
+downloadTeamChannels = false
 
 [publicChannelOptions]
 # We only want a sample of those public channels
@@ -164,7 +166,7 @@ sessionPostLimit = 100
 [[teams]]
 team.name = "Team"
 downloadPublicChannels = false
-publicChannels: [
+publicChannels = [
   {internalName = "public1"},
   {internalName = "public2"}
 ]
@@ -172,7 +174,7 @@ publicChannels: [
 
 ### Download specific channel
 
-Public/private channel:
+> Public/private channel:
 
 ```toml
 # Download only explicitly chosen channels
@@ -181,8 +183,8 @@ downloadUserChannels = false
 downloadGroupChannels = false
 
 [[teams]]
- We could also identify team by its `internalName` (which is unambiguous) or internal id
-tean.name = "Team"
+# We could also identify team by its displaed `name` (which can be ambiguous) or internal `id`
+team.internalName = "Team"
 # Again, download only explicitly chosen channels
 downloadPublicChannels = false
 downloadPrivateChannels = false
@@ -196,7 +198,7 @@ name = "Channel name"
 name = "Another channel under team Team"
 ```
 
-Group channel:
+> Group channel:
 
 ```toml
 [[groups]]
@@ -204,6 +206,7 @@ group = [
   {name = "member user 1"},
   {name = "member user 2"},
   {name = "member user 3"}
+  # User we're downloading as is there implicitly
 ]
 # Usual channel options are supported
 downloadFromOldest = false
@@ -213,7 +216,7 @@ downloadFromOldest = false
 group = "abcdef"
 ```
 
-Direct (one-on-one, user-specific) channel:
+> Direct (one-on-one, user-specific) channel:
 
 ```toml
 # To stop downloading OTHER user cannels
@@ -224,7 +227,7 @@ name = "username"
 # Usual channel options are supported
 ```
 
-Skip downloading specific channel:
+> Skip downloading specific channel:
 
 ```toml
 [[users]]
@@ -234,7 +237,7 @@ maximumPostCount = 0
 
 ### Download only messages in some time range
 
-Download things after date:
+> Download things after date:
 
 ```toml
 [defaultChannelOptions]
@@ -246,7 +249,7 @@ Available time formats are:
 - ISO datetime (`"1970-01-01T01:23:45.832330"`)
 - Unix timestamp in ms (`12345`)
 
-Download things in interval:
+> Download things in interval:
 
 ```toml
 [defaultChannelOptions]
@@ -254,20 +257,20 @@ afterTime = "1970-01-01"
 beforeTime = "2000-01-01"
 ```
 
-Download thing after specific post:
+> Download thing after specific post:
 
 ```toml
 [defaultChannelOptions]
 afterPost = "abcdef" # Post Id
 ```
 
-Download and keep only last 10 messages:
+> Download and keep only last 10 messages:
 
-```json
+```toml
 [[users]]
 name = "username"
 downloadFromOldest = false
-messageCount = 10
+maximumPostCount = 10
 onExistingIncompatible = "delete"
 ```
 
@@ -300,7 +303,7 @@ allowedMimeTypes = [
 ### Reduce backup creation
 
 By default, lot of care exist to prevent loss of already downloaded data.
-That leads to keeping intermediate data on errors and interrupted downloads and backing up the channel in case it's redownloaded when the required options for that channel aren't compatible with appending into previous storage.
+That leads to keeping intermediate data on errors + interrupted downloads and backing up the channel in case it's redownloaded when the required options for that channel aren't compatible with appending into previous storage.
 Those backups can be distingushed by having `--backup` in their name and should be removed manually if not required.
 
 The redownload case can be configured like so:
@@ -314,6 +317,8 @@ onExistingIncompatible = "delete"
 ```
 
 ## Supported environmental variables
+
+(Overrides respective config setting.)
 
 - `MATTERMOST_SERVER`
 - `MATTERMOST_USERNAME`
@@ -340,6 +345,7 @@ The format was chosen carefully to be
 - forward compatible (explicit versioning)
 - data source independent (not mirroring Mattermost's API - should be good enough even with later versions or similar platforms such as Discord)
 - lossless (unknown fetches fields are preserved in untyped dict fields `misc` of appropriate entity)
+  - note that some metadata provided by Mattermost API are known to not be useful for keeping local history and are dropped
 - well defined (see provided JSON schemas)
 - optimized for efficient appending (as described earlier)
 
@@ -361,12 +367,17 @@ Current Mattermost API is suited for fetching posts from latest to oldest and on
 In certain cases, such as "downloading from oldest, grab 100 posts after certain date.", we must actually process all posts from the channel begginning right until the time condition starts passing.
 In general, it's very fast to download posts before or after some explicit post, which makes successive downloads (fetching updates) much faster.
 
-### What does "upper limit approximate" means during download?
+### What does "upper limit approximate" mean during download?
 
 In many cases, it's unclear or impractical to calculate how many posts will actually be downloaded.
 For example, if our selection condition is arbitrary such as "1000 posts after date 2020-01-01" - we don't know until how many messages would match that.
 Sometimes, we may have an estimation; for example, hard limit of 10 posts mean we surely won't get _more_ than 10, but we still don't know if less than 10 are really available.
 Likewise, Mattermost server may provide total number of channel's posts, but this count doesn't have to reflect what we can actually download even if we're downloading the whole channel, as it's approximate - for example, deleted posts are not fetched.
+
+### Known issues?
+
+Unknown configuration options are warned about in general case, but some more advanced cases aren't caught by used underlying json schema validation library, such as unknown channel options.
+Caused by combination of anchor (`$ref`) and disallowed `additionalProperties`.
 
 ## Internal design
 

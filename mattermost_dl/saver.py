@@ -1072,7 +1072,7 @@ class Saver:
 
         private = channelRequest.metadata.type == ChannelType.Private
 
-        logging.info(f'Processing {"private" if private else "open"} channel {team.internalName}/{channel.internalName} ...')
+        logging.info(f'Processing {"private" if private else "public"} channel {team.internalName}/{channel.internalName} ...')
         channelOutfile = f'{"p" if private else "o"}.{team.internalName}--{channel.internalName}'
 
         header = ChannelHeader(channel=channel, team=team)
