@@ -176,7 +176,7 @@ Public/private channel:
 
 ```toml
 # Download only explicitly chosen channels
-downloadTeams = false
+downloadTeamChannels = false
 downloadUserChannels = false
 downloadGroupChannels = false
 
@@ -275,7 +275,7 @@ onExistingIncompatible = "delete"
 
 ```toml
 # These are on by default
-downloadTeams = true
+downloadTeamChannels = true
 downloadUserChannels = true
 downloadGroupChannels = true
 

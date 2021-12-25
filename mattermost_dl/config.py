@@ -325,8 +325,8 @@ class ConfigFile:
         else:
             self.publicChannelDefaults = self.channelDefaults
 
-        if 'downloadTeams' in config:
-            self.miscTeams = config['downloadTeams']
+        if 'downloadTeamChannels' in config:
+            self.miscTeams = config['downloadTeamChannels']
         if 'teams' in config:
             assert isinstance(config['teams'], list)
             self.explicitTeams = [

@@ -201,7 +201,7 @@
         }
       }
     },
-    "downloadTeams": {
+    "downloadTeamChannels": {
       "description": "Should download team-based channels? (Ones explicitly specified in `teams` are treated separately)",
       "type": "boolean"
     },
