@@ -53,6 +53,7 @@
       ]
     },
     "channelPostOptions": {
+      "description": "Defines constraints on what channel contents should be downloaded. Can be defined on multiple levels (such as 'all channels' vs 'concrete channel', more specific options override more general ones.",
       "type": "object",
       "properties": {
         "beforePost": {

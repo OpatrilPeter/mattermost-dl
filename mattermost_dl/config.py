@@ -13,6 +13,7 @@ from .recovery_actions import RBackup, RDelete, RReuse, RSkipDownload
 
 import argparse
 from collections.abc import Iterable
+from copy import deepcopy
 import json
 from json.decoder import JSONDecodeError
 import jsonschema
@@ -110,8 +111,7 @@ class ChannelSpec:
     def __init__(self, info: dict, defaultOpts: ChannelOptions):
         self.locator = EntityLocator(info)
 
-        self.opts = dataclasses.replace(defaultOpts)
-        self.opts.update(info)
+        self.opts = deepcopy(defaultOpts).update(info)
 
 @dataclass(init=False)
 class GroupChannelSpec:
@@ -126,8 +126,7 @@ class GroupChannelSpec:
             assert isinstance(groupLocator, list)
             self.locator = [EntityLocator(chan) for chan in groupLocator]
 
-        self.opts = dataclasses.replace(defaultOpts)
-        self.opts.update(info)
+        self.opts = deepcopy(defaultOpts).update(info)
 
 @dataclass
 class TeamSpec:
@@ -144,19 +143,23 @@ class TeamSpec:
         self = TeamSpec(locator=EntityLocator(info['team']))
 
         if 'defaultChannelOptions' in info:
-            channelDefaults = ChannelOptions().update(info['defaultChannelOptions'])
+            channelDefaultDict = info['defaultChannelOptions']
         else:
-            channelDefaults = None
-        if 'privateChannelOptions' in info:
-            self.privateChannelDefaults = ChannelOptions().update(info['privateChannelOptions'])
-        elif channelDefaults:
-            self.privateChannelDefaults = channelDefaults
+            channelDefaultDict = None
+        if channelDefaultDict or 'privateChannelOptions' in info:
+            self.privateChannelDefaults = deepcopy(globalPrivateDefaults)
+            if channelDefaultDict:
+                self.privateChannelDefaults = self.privateChannelDefaults.update(channelDefaultDict)
+            if 'privateChannelOptions' in info:
+                self.privateChannelDefaults = self.privateChannelDefaults.update(info['privateChannelOptions'])
         else:
             self.privateChannelDefaults = globalPrivateDefaults
-        if 'publicChannelOptions' in info:
-            self.publicChannelDefaults = ChannelOptions().update(info['publicChannelOptions'])
-        elif channelDefaults:
-            self.publicChannelDefaults = channelDefaults
+        if channelDefaultDict or 'publicChannelOptions' in info:
+            self.publicChannelDefaults = deepcopy(globalPublicDefaults)
+            if channelDefaultDict:
+                self.publicChannelDefaults = self.publicChannelDefaults.update(channelDefaultDict)
+            if 'publicChannelOptions' in info:
+                self.publicChannelDefaults = self.publicChannelDefaults.update(info['publicChannelOptions'])
         else:
             self.publicChannelDefaults = globalPublicDefaults
 
@@ -309,19 +312,19 @@ class ConfigFile:
         else:
             self.channelDefaults = ChannelOptions()
         if 'userChannelOptions' in config:
-            self.directChannelDefaults = ChannelOptions().update(config['userChannelOptions'])
+            self.directChannelDefaults = deepcopy(self.channelDefaults).update(config['userChannelOptions'])
         else:
             self.directChannelDefaults = self.channelDefaults
         if 'groupChannelOptions' in config:
-            self.groupChannelDefaults = ChannelOptions().update(config['groupChannelOptions'])
+            self.groupChannelDefaults = deepcopy(self.channelDefaults).update(config['groupChannelOptions'])
         else:
             self.groupChannelDefaults = self.channelDefaults
         if 'privateChannelOptions' in config:
-            self.privateChannelDefaults = ChannelOptions().update(config['privateChannelOptions'])
+            self.privateChannelDefaults = deepcopy(self.channelDefaults).update(config['privateChannelOptions'])
         else:
             self.privateChannelDefaults = self.channelDefaults
         if 'publicChannelOptions' in config:
-            self.publicChannelDefaults = ChannelOptions().update(config['publicChannelOptions'])
+            self.publicChannelDefaults = deepcopy(self.channelDefaults).update(config['publicChannelOptions'])
         else:
             self.publicChannelDefaults = self.channelDefaults
 
