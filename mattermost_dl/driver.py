@@ -212,7 +212,7 @@ class MattermostDriver:
             return Id(left)
 
     def loadChannelMembers(self, channel: Channel):
-        if len(channel.members) != 0:
+        if channel.members is not None:
             return
 
         res = []

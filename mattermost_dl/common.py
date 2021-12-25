@@ -14,8 +14,8 @@ import re
 import sys
 import traceback
 from typing import (
-    Any, BinaryIO, Callable, cast, ClassVar,
-    Collection, Dict, Iterable, Generator, List, Mapping, NewType, NoReturn,
+    Any, BinaryIO, Callable, cast, ClassVar, Collection, Dict,
+    FrozenSet, Iterable, Generator, List, Mapping, NewType, NoReturn,
     Optional, Set, Sized, TextIO, Tuple, Type, TypeVar, Union
 )
 

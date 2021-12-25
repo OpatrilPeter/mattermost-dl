@@ -87,6 +87,13 @@
                     "description": "Time of the creation for the latest post, in miliseconds sinde 1970-01-01.",
                     "type": "integer"
                 },
+                "members": {
+                    "description": "Contains full list of member users.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/properties/users/items"
+                    }
+                },
                 "misc": {
                     "$ref": "#/definitions/misc"
                 }

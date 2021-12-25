@@ -625,7 +625,7 @@ class Channel(JsonMessage):
     # How many messages are not replies
     rootMessageCount: Optional[int] = None
     lastMessageTime: Optional[Time] = None
-    members: List[User] = dataclassfield(default_factory=list)
+    members: Optional[List[User]] = None
 
     def __hash__(self):
         return hash(self.id)

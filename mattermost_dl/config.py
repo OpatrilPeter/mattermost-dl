@@ -115,7 +115,7 @@ class ChannelSpec:
 
 @dataclass(init=False)
 class GroupChannelSpec:
-    locator: Union[Id, List[EntityLocator]]
+    locator: Union[Id, FrozenSet[EntityLocator]]
     opts: ChannelOptions = ChannelOptions()
 
     def __init__(self, info: dict, defaultOpts: ChannelOptions):
@@ -124,9 +124,12 @@ class GroupChannelSpec:
             self.locator = cast(Id, groupLocator)
         else:
             assert isinstance(groupLocator, list)
-            self.locator = [EntityLocator(chan) for chan in groupLocator]
+            self.locator = frozenset(EntityLocator(chan) for chan in groupLocator)
 
         self.opts = deepcopy(defaultOpts).update(info)
+
+    def __hash__(self) -> int:
+        return hash(self.locator)
 
 @dataclass
 class TeamSpec:

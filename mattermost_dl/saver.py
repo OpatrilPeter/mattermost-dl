@@ -68,14 +68,18 @@ class Saver:
         else:
             raise ValueError
 
-    def matchGroupChannel(self, channel: Channel, locator: Union[Id, List[EntityLocator]]) -> bool:
+    def matchGroupChannel(self, channel: Channel, locator: Union[Id, FrozenSet[EntityLocator]]) -> bool:
         if isinstance(locator, str):
             return channel.id == locator
         else:
-            assert isinstance(locator, list)
+            assert isinstance(locator, frozenset)
+            if channel.members is None:
+                self.driver.loadChannelMembers(channel)
+                assert channel.members is not None
             users = set(self.getUserByLocator(userLocator)
                 for userLocator in locator
             )
+            users.add(self.user)
             return users == set(u for u in channel.members)
 
     def getWantedUsers(self) -> List[Tuple[User, ChannelOptions]]:
@@ -1046,8 +1050,9 @@ class Saver:
 
     def processGroupChannel(self, channelRequest: ChannelRequest):
         channel, options = channelRequest.metadata, channelRequest.config
-        if len(channel.members) == 0:
+        if channel.members is None:
             self.driver.loadChannelMembers(channel)
+            assert channel.members is not None
         userlist = '-'.join(sorted(u.name for u in channel.members))
         if userlist == '':
             logging.warning(f'No users for group channel {channel.id}, using id as name!')
